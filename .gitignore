@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.local
+.env.*.local
+
+uploads/employees/*
+!uploads/employees/.gitkeep
+
+*.log
+npm-debug.log*
+.DS_Store

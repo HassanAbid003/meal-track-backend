@@ -25,7 +25,6 @@ const UserSchema = new mongoose.Schema({
     ref: 'Site',
     default: null,
   },
-  // PAGE-BASED PERMISSIONS
   permissions: {
     pages: {
       dashboard:   { type: Boolean, default: true },
@@ -39,16 +38,16 @@ const UserSchema = new mongoose.Schema({
     viewAllSites: { type: Boolean, default: false },
     exportData:   { type: Boolean, default: false },
   },
+  resetPasswordToken: { type: String, default: null },
+  resetPasswordExpire: { type: Date, default: null },
 }, { timestamps: true });
 
-// Hash password before saving
 UserSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Compare password
 UserSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

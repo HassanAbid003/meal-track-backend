@@ -8,6 +8,15 @@ const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
+// Cookie options (shared between login and logout)
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax',
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+  path: '/',
+};
+
 // @desc    Register a new user
 // @route   POST /api/auth/register
 // @access  Private (Super Admin only)
@@ -37,7 +46,6 @@ const registerUser = async (req, res) => {
         role: user.role,
         site_id: user.site_id,
         permissions: user.permissions,
-        token: generateToken(user._id),
       });
     } else {
       res.status(400).json({ message: 'Invalid user data' });
@@ -47,7 +55,7 @@ const registerUser = async (req, res) => {
   }
 };
 
-// @desc    Auth user & get token
+// @desc    Auth user & set HttpOnly cookie
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
@@ -57,6 +65,11 @@ const loginUser = async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await user.matchPassword(password))) {
+      const token = generateToken(user._id);
+
+      // Set HttpOnly cookie
+      res.cookie('auth_token', token, cookieOptions);
+
       res.json({
         _id: user._id,
         name: user.name,
@@ -64,7 +77,6 @@ const loginUser = async (req, res) => {
         role: user.role,
         site_id: user.site_id,
         permissions: user.permissions,
-        token: generateToken(user._id),
       });
     } else {
       res.status(401).json({ message: 'Invalid email or password' });
@@ -72,6 +84,19 @@ const loginUser = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
+};
+
+// @desc    Logout user (clear cookie)
+// @route   POST /api/auth/logout
+// @access  Public
+const logoutUser = async (req, res) => {
+  res.clearCookie('auth_token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+  });
+  res.json({ message: 'Logged out successfully' });
 };
 
 // @desc    Get user profile
@@ -88,21 +113,13 @@ const getMe = async (req, res) => {
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
 
-  console.log('====================================');
-  console.log('🟢 FORGOT PASSWORD CALLED');
-  console.log('🟢 Email from request:', email);
-
   const genericResponse = {
     message: 'If that email exists, a reset link has been sent.',
   };
 
   try {
     const user = await User.findOne({ email });
-    console.log('🟢 User found:', user ? user.email : 'NONE');
-
     if (!user) {
-      console.log('🔴 No user — exiting early');
-      console.log('====================================');
       return res.status(200).json(genericResponse);
     }
 
@@ -112,21 +129,9 @@ const forgotPassword = async (req, res) => {
       .update(resetToken)
       .digest('hex');
 
-    console.log('🟢 Raw token (sent in email):', resetToken)
-    console.log('🟢 Hashed token (saved to DB):', hashedToken)
-
     user.resetPasswordToken = hashedToken;
     user.resetPasswordExpire = Date.now() + 15 * 60 * 1000;
-
-    console.log('🟢 Before save — token field:', user.resetPasswordToken)
-    console.log('🟢 Before save — expire field:', user.resetPasswordExpire)
-
     await user.save({ validateBeforeSave: false });
-
-    const check = await User.findOne({ email });
-    console.log('🟢 After save — DB token:', check.resetPasswordToken)
-    console.log('🟢 After save — DB expire:', check.resetPasswordExpire)
-    console.log('====================================');
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const resetUrl = `${frontendUrl}/reset-password/${resetToken}`;
@@ -154,22 +159,17 @@ const forgotPassword = async (req, res) => {
         subject: 'MealTrack - Password Reset',
         html,
       });
-      console.log('🟢 Email sent successfully');
     } catch (emailErr) {
       user.resetPasswordToken = null;
       user.resetPasswordExpire = null;
       await user.save({ validateBeforeSave: false });
-      console.error('🔴 Email send failed:', emailErr);
-      console.log('====================================');
+      console.error('Email send failed:', emailErr);
       return res.status(500).json({ message: 'Email could not be sent' });
     }
 
-    console.log('✅ forgotPassword completed successfully');
-    console.log('====================================');
     return res.status(200).json(genericResponse);
   } catch (error) {
-    console.error('🔴 forgotPassword error:', error);
-    console.log('====================================');
+    console.error('forgotPassword error:', error);
     return res.status(500).json({ message: 'Something went wrong' });
   }
 };
@@ -179,29 +179,15 @@ const forgotPassword = async (req, res) => {
 // @access  Public
 const resetPassword = async (req, res) => {
   try {
-    console.log('====================================');
-    console.log('RESET PASSWORD CALLED');
-    console.log('Token from URL:', req.params.token);
-    console.log('Token length:', req.params.token?.length);
-
     const hashedToken = crypto
       .createHash('sha256')
       .update(req.params.token)
       .digest('hex');
 
-    console.log('Hashed token:', hashedToken);
-
     const user = await User.findOne({
       resetPasswordToken: hashedToken,
       resetPasswordExpire: { $gt: Date.now() },
     });
-
-    console.log('User found:', user ? user.email : 'NONE');
-    if (user) {
-      console.log('Token expire:', user.resetPasswordExpire);
-      console.log('Now:', new Date());
-    }
-    console.log('====================================');
 
     if (!user) {
       return res.status(400).json({ message: 'Invalid or expired reset token' });
@@ -228,6 +214,7 @@ const resetPassword = async (req, res) => {
 module.exports = {
   registerUser,
   loginUser,
+  logoutUser,
   getMe,
   forgotPassword,
   resetPassword,

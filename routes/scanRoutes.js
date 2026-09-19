@@ -9,8 +9,8 @@ const { checkPageAccess } = require('../middleware/pageAccessMiddleware');
 
 const router = express.Router();
 
-// Public (Mess Keeper / Scanner device)
-router.post('/', verifyScan);
+// Protected — Mess Keeper must be logged in (Bearer token)
+router.post('/', protect, verifyScan);
 
 // Private (Super Admin / Site Admin)
 router.get('/recent', protect, checkPageAccess('reports'), getRecentScans);

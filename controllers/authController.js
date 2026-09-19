@@ -59,6 +59,7 @@ const registerUser = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
+  console.log(`${req.method} ${req.url} - ${new Date().toISOString()}`);
   const { email, password } = req.body;
 
   try {
@@ -67,16 +68,26 @@ const loginUser = async (req, res) => {
     if (user && (await user.matchPassword(password))) {
       const token = generateToken(user._id);
 
-      // Set HttpOnly cookie
+      // Set HttpOnly cookie (for web admin panel)
       res.cookie('auth_token', token, cookieOptions);
 
-      res.json({
+      // Build the user payload once
+      const userPayload = {
         _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
         site_id: user.site_id,
         permissions: user.permissions,
+      };
+
+      // Respond with BOTH shapes:
+      //   - Flat fields (_id, name, ...)  → keeps web admin panel working
+      //   - { token, user }               → mobile app reads these
+      res.json({
+        token,
+        user: userPayload,
+        ...userPayload,
       });
     } else {
       res.status(401).json({ message: 'Invalid email or password' });

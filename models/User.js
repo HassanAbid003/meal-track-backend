@@ -25,6 +25,10 @@ const UserSchema = new mongoose.Schema({
     ref: 'Site',
     default: null,
   },
+  device_serial: {
+  type: String,
+  default: null,
+},
   permissions: {
     pages: {
       dashboard:   { type: Boolean, default: true },

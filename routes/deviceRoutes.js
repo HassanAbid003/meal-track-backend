@@ -6,9 +6,13 @@ const deviceController = require('../controllers/deviceController');
 const router = express.Router();
 
 router.use(protect);
-router.use(checkPageAccess('devices')); // ← Page access check
 
-router.route('/').get(deviceController.getDevices).post(deviceController.createDevice);
-router.route('/:id').put(deviceController.updateDevice).delete(deviceController.deleteDevice);
+// Any logged-in user can list their site's devices (mobile app needs this)
+router.get('/', deviceController.getDevices);
+
+// Write operations require devices page access
+router.post('/', checkPageAccess('devices'), deviceController.createDevice);
+router.put('/:id', checkPageAccess('devices'), deviceController.updateDevice);
+router.delete('/:id', checkPageAccess('devices'), deviceController.deleteDevice);
 
 module.exports = router;

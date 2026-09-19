@@ -18,10 +18,33 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:8081',
+  'http://192.168.1.39:8081',
+];
+
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+
+    // Allow explicit whitelist
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    // In dev, allow any LAN address on any port
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      /^http:\/\/(localhost|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
   credentials: true,
 }));
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -49,6 +72,6 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start the server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
 });

@@ -4,9 +4,16 @@ const User = require('../models/User');
 const protect = async (req, res, next) => {
   let token;
 
-  // Read from HttpOnly cookie
+  // 1. Try HttpOnly cookie (web admin panel)
   if (req.cookies && req.cookies.auth_token) {
     token = req.cookies.auth_token;
+  }
+  // 2. Fall back to Authorization: Bearer <token> (mobile app)
+  else if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer ')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
   }
 
   if (!token) {

@@ -21,7 +21,7 @@ const getUsers = async (req, res) => {
         { email: { $regex: search, $options: 'i' } },
       ];
     }
-    if (role && role !== 'All' && ['super_admin', 'site_admin'].includes(role)) {
+    if (role && role !== 'All' && ['super_admin', 'site_admin', 'mess_keeper'].includes(role)) {
       userQuery.role = role;
     }
     if (site_id && site_id !== 'All') {
@@ -84,7 +84,7 @@ const getUsers = async (req, res) => {
   }
 };
 
-// @desc    Promote an employee to Site Admin (creates a User)
+// @desc    Promote an employee to Site Admin OR Mess Keeper (creates a User)
 // @route   POST /api/users/promote
 // @access  Private (Super Admin only)
 const promoteEmployee = async (req, res) => {
@@ -93,7 +93,7 @@ const promoteEmployee = async (req, res) => {
       return res.status(403).json({ message: 'Access denied: Super Admin only' });
     }
 
-    const { employeeId, role, site_id, password } = req.body;
+    const { employeeId, role, site_id, password, device_serial } = req.body;
 
     const employee = await Employee.findById(employeeId);
     if (!employee) {
@@ -106,27 +106,45 @@ const promoteEmployee = async (req, res) => {
     }
 
     const newRole = role || 'site_admin';
-    const finalSiteId = site_id || employee.site_id;
+    if (!['site_admin', 'mess_keeper'].includes(newRole)) {
+      return res.status(400).json({ message: 'Role must be site_admin or mess_keeper' });
+    }
 
+    const finalSiteId = site_id || employee.site_id;
     if (!finalSiteId) {
       return res.status(400).json({ message: 'Site is required' });
     }
 
     const plainPassword = password || 'password123';
 
-    const defaultPermissions = {
-      pages: {
-        dashboard: true,
-        messSites: true,
-        employees: true,
-        shifts: true,
-        devices: true,
-        departments: true,
-        reports: true,
-      },
-      viewAllSites: false,
-      exportData: false,
-    };
+    // Site Admin gets all pages enabled. Mess Keeper gets everything off (mobile only).
+    const defaultPermissions = newRole === 'site_admin'
+      ? {
+          pages: {
+            dashboard: true,
+            messSites: true,
+            employees: true,
+            shifts: true,
+            devices: true,
+            departments: true,
+            reports: true,
+          },
+          viewAllSites: false,
+          exportData: false,
+        }
+      : {
+          pages: {
+            dashboard: false,
+            messSites: false,
+            employees: false,
+            shifts: false,
+            devices: false,
+            departments: false,
+            reports: false,
+          },
+          viewAllSites: false,
+          exportData: false,
+        };
 
     const user = await User.create({
       name: employee.name,
@@ -134,6 +152,7 @@ const promoteEmployee = async (req, res) => {
       password: plainPassword,
       role: newRole,
       site_id: finalSiteId,
+      device_serial: newRole === 'mess_keeper' ? (device_serial || null) : null,
       permissions: defaultPermissions,
     });
 
@@ -187,14 +206,14 @@ const updateUserPermissions = async (req, res) => {
   }
 };
 
-// @desc    Update user role
+// @desc    Update user role (site_admin ↔ mess_keeper ↔ employee)
 const updateUserRole = async (req, res) => {
   try {
     if (req.user.role !== 'super_admin') {
       return res.status(403).json({ message: 'Access denied: Super Admin only' });
     }
 
-    const { role } = req.body;
+    const { role, device_serial } = req.body;
     const user = await User.findById(req.params.id);
 
     if (!user) return res.status(404).json({ message: 'User not found' });
@@ -202,7 +221,7 @@ const updateUserRole = async (req, res) => {
       return res.status(400).json({ message: 'Cannot modify Super Admin' });
     }
 
-    const validRoles = ['site_admin', 'employee'];
+    const validRoles = ['site_admin', 'mess_keeper', 'employee'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ message: 'Invalid role' });
     }
@@ -213,6 +232,14 @@ const updateUserRole = async (req, res) => {
     }
 
     user.role = role;
+
+    // Only mess_keeper keeps a device_serial
+    if (role === 'mess_keeper') {
+      if (device_serial !== undefined) user.device_serial = device_serial || null;
+    } else {
+      user.device_serial = null;
+    }
+
     await user.save();
 
     const updated = await User.findById(user._id).select('-password').populate('site_id', 'name code');

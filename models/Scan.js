@@ -4,7 +4,7 @@ const ScanSchema = new mongoose.Schema({
   employee_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee',
-    required: false,  // ← Change to false
+    required: false,
   },
   device_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -24,6 +24,10 @@ const ScanSchema = new mongoose.Schema({
   reason: {
     type: String,
     default: '',
+  },
+  shift: {
+    type: String,
+    default: null,   // 'Breakfast' | 'Lunch' | 'Dinner' | null
   },
 }, { timestamps: true });
 

@@ -50,8 +50,6 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:8081',
   'http://192.168.1.39:8081',
-  // Add your Netlify/deployed frontend URL here when ready:
-  // 'https://your-netlify-url.netlify.app',
 ];
 
 app.use(cors({
@@ -62,12 +60,12 @@ app.use(cors({
     // Allow explicit whitelist
     if (allowedOrigins.includes(origin)) return callback(null, true);
 
-    // Allow any LAN/localhost address — dev convenience
+    // Always allow localhost & LAN (dev convenience)
     if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)) {
       return callback(null, true);
     }
 
-    // Allow any *.railway.app origin (for future deployed frontends)
+    // Allow any *.railway.app origin
     if (/^https:\/\/[a-z0-9-]+\.railway\.app$/.test(origin)) {
       return callback(null, true);
     }

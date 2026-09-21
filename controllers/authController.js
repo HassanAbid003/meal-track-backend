@@ -9,10 +9,21 @@ const generateToken = (id) => {
 };
 
 // Cookie options (shared between login and logout)
+// const cookieOptions = {
+//   httpOnly: true,
+//   secure: process.env.NODE_ENV === 'production',
+//   sameSite: 'lax',
+//   maxAge: 7 * 24 * 60 * 60 * 1000,
+//   path: '/',
+// };
+
+// Cookie options (shared between login and logout)
+const isProduction = process.env.NODE_ENV === 'production';
+
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
+  secure: isProduction,                           // true on Railway HTTPS
+  sameSite: isProduction ? 'none' : 'lax',        // 'none' for cross-domain
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
 };
@@ -100,11 +111,21 @@ const loginUser = async (req, res) => {
 // @desc    Logout user (clear cookie)
 // @route   POST /api/auth/logout
 // @access  Public
+// const logoutUser = async (req, res) => {
+//   res.clearCookie('auth_token', {
+//     httpOnly: true,
+//     secure: process.env.NODE_ENV === 'production',
+//     sameSite: 'lax',
+//     path: '/',
+//   });
+//   res.json({ message: 'Logged out successfully' });
+// };
+
 const logoutUser = async (req, res) => {
   res.clearCookie('auth_token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
     path: '/',
   });
   res.json({ message: 'Logged out successfully' });

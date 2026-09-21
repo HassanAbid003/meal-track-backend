@@ -7,6 +7,9 @@ const router = express.Router();
 
 router.use(protect);
 
+// Heartbeat — any authenticated user with a device
+router.post('/heartbeat', deviceController.heartbeat);
+
 // Any logged-in user can list their site's devices (mobile app needs this)
 router.get('/', deviceController.getDevices);
 

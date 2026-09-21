@@ -12,8 +12,11 @@ const router = express.Router();
 // Protected — Mess Keeper must be logged in (Bearer token)
 router.post('/', protect, verifyScan);
 
-// Private (Super Admin / Site Admin)
-router.get('/recent', protect, checkPageAccess('reports'), getRecentScans);
+// Recent scans — accessible to Super Admin, Site Admin, AND Mess Keeper
+// (controller handles role-based filtering)
+router.get('/recent', protect, getRecentScans);
+
+// Weekly stats — still admin-only
 router.get('/stats/weekly', protect, checkPageAccess('reports'), getWeeklyStats);
 
 module.exports = router;

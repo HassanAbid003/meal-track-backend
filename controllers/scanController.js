@@ -178,20 +178,40 @@ const verifyScan = async (req, res) => {
 // @desc    Get recent scans
 // @route   GET /api/scan/recent
 // @access  Private (Super Admin / Site Admin)
+// @desc    Get recent scans
+// @route   GET /api/scan/recent
+// @access  Private (Super Admin / Site Admin / Mess Keeper)
 const getRecentScans = async (req, res) => {
   try {
+    const { device_serial, limit } = req.query;
+
     let query = {};
-    if (req.user.role === 'site_admin') {
+
+    // Role-based site filter
+    if (req.user.role === 'site_admin' || req.user.role === 'mess_keeper') {
       query.site_id = req.user.site_id;
     }
 
-    const scans = await Scan.find(query)
-      .populate('employee_id', 'name empId')
-      .populate('device_id', 'name serial')
-      .sort({ createdAt: -1 })
-      .limit(20);
+    // If device_serial provided, filter to just that device
+    if (device_serial) {
+      const device = await Device.findOne({ serial: device_serial }).select('_id');
+      if (!device) {
+        return res.status(404).json({ message: 'Device not found' });
+      }
+      query.device_id = device._id;
+    }
 
-    console.log(`✅ Found ${scans.length} recent scans`);
+    // Limit: default 100, max 500
+    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+
+    const scans = await Scan.find(query)
+      .populate('employee_id', 'name empId department image')
+      .populate('device_id', 'name serial')
+      .populate('site_id', 'name code')
+      .sort({ createdAt: -1 })
+      .limit(parsedLimit);
+
+    console.log(`✅ Found ${scans.length} recent scans (device_serial=${device_serial || 'any'})`);
     res.json(scans);
   } catch (error) {
     console.error('🔴 Error in getRecentScans:', error);

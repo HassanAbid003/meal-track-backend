@@ -1,28 +1,20 @@
 const Employee = require('../models/Employee');
 const Department = require('../models/Department');
-const fs = require('fs');
-const path = require('path');
+const cloudinary = require('cloudinary').v2;
 
-// Helper function to update department counts
+// Helper: update department counts
 const updateDepartmentCounts = async (departmentName) => {
   if (!departmentName) return;
-
   try {
-    const total = await Employee.countDocuments({
-      department: departmentName
-    });
-
+    const total = await Employee.countDocuments({ department: departmentName });
     const active = await Employee.countDocuments({
       department: departmentName,
-      status: 'Active'
+      status: 'Active',
     });
 
     await Department.findOneAndUpdate(
       { name: departmentName },
-      {
-        totalRegistered: total,
-        activeMembers: active
-      },
+      { totalRegistered: total, activeMembers: active },
       { new: true }
     );
 
@@ -32,38 +24,39 @@ const updateDepartmentCounts = async (departmentName) => {
   }
 };
 
-// Helper to delete an old image file
-const deleteImageFile = (imagePath) => {
-  if (!imagePath) return;
-  const fullPath = path.join(__dirname, '..', imagePath);
-  fs.unlink(fullPath, (err) => {
-    if (err && err.code !== 'ENOENT') {
-      console.error('Error deleting image file:', err);
+// Helper: delete an image from Cloudinary
+const deleteImageFile = async (imageUrl) => {
+  if (!imageUrl) return;
+  // Only attempt delete if it's a Cloudinary URL
+  if (!imageUrl.includes('res.cloudinary.com')) return;
+
+  try {
+    // Extract public_id from URL:
+    // https://res.cloudinary.com/<cloud>/image/upload/v123/mealtrack/employees/employee-xxx.png
+    // → mealtrack/employees/employee-xxx
+    const match = imageUrl.match(/\/upload\/(?:v\d+\/)?(.+?)(\.\w+)?$/);
+    if (match && match[1]) {
+      await cloudinary.uploader.destroy(match[1]);
+      console.log('🗑️ Deleted from Cloudinary:', match[1]);
     }
-  });
+  } catch (err) {
+    console.error('Error deleting Cloudinary image:', err.message);
+  }
 };
 
-// Helper to validate phone format: +92 3XX-XXXXXXX
-const isValidPhone = (phone) => {
-  return /^\+92 3\d{2}-\d{7}$/.test(phone);
-};
+// Validate phone format: +92 3XX-XXXXXXX
+const isValidPhone = (phone) => /^\+92 3\d{2}-\d{7}$/.test(phone);
 
-// Helper to validate CNIC format: 12345-6789012-3
-const isValidCnic = (cnic) => {
-  return /^\d{5}-\d{7}-\d$/.test(cnic);
-};
+// Validate CNIC format: 12345-6789012-3
+const isValidCnic = (cnic) => /^\d{5}-\d{7}-\d$/.test(cnic);
 
 // @desc    Get all employees
-// @route   GET /api/employees
-// @access  Private
 const getEmployees = async (req, res) => {
   try {
     let query = {};
-
     if (req.user.role === 'site_admin') {
       query.site_id = req.user.site_id;
     }
-
     const employees = await Employee.find(query).populate('site_id', 'code name');
     res.json(employees);
   } catch (error) {
@@ -71,86 +64,59 @@ const getEmployees = async (req, res) => {
   }
 };
 
-// @desc    Get single employee by ID
-// @route   GET /api/employees/:id
-// @access  Private
+// @desc    Get single employee
 const getEmployeeById = async (req, res) => {
   try {
     const employee = await Employee.findById(req.params.id).populate('site_id', 'code name');
-
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
+    if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
     if (req.user.role === 'site_admin' && employee.site_id._id.toString() !== req.user.site_id.toString()) {
       return res.status(403).json({ message: 'Access denied: Employee not in your site' });
     }
-
     res.json(employee);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Create a new employee
-// @route   POST /api/employees
-// @access  Private (Super Admin / Site Admin)
+// @desc    Create employee
 const createEmployee = async (req, res) => {
   const { empId, name, email, department, site_id, shifts, role, status, is_registered, phone, cnic } = req.body;
 
   try {
-    // Validate phone
     if (!phone || !isValidPhone(phone)) {
-      if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+      if (req.file) await deleteImageFile(req.file.path);
       return res.status(400).json({ message: 'Phone must be in format: +92 3XX-XXXXXXX' });
     }
-
-    // Validate CNIC
     if (!cnic || !isValidCnic(cnic)) {
-      if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+      if (req.file) await deleteImageFile(req.file.path);
       return res.status(400).json({ message: 'CNIC must be in format: 12345-6789012-3' });
     }
 
-    // Check for existing empId, email, or cnic
-    const employeeExists = await Employee.findOne({
-      $or: [{ empId }, { email }, { cnic }]
-    });
+    const employeeExists = await Employee.findOne({ $or: [{ empId }, { email }, { cnic }] });
     if (employeeExists) {
-      if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+      if (req.file) await deleteImageFile(req.file.path);
       return res.status(400).json({ message: 'Employee ID, Email, or CNIC already exists' });
     }
 
-    // If Site Admin, force their site_id
     let finalSiteId = site_id;
-    if (req.user.role === 'site_admin') {
-      finalSiteId = req.user.site_id;
-    }
+    if (req.user.role === 'site_admin') finalSiteId = req.user.site_id;
+    if (!finalSiteId) finalSiteId = '6a9d6e038dcda3144e04072e';
 
-    if (!finalSiteId) {
-      finalSiteId = '6a9d6e038dcda3144e04072e';
-    }
-
-    // Parse shifts if it came as a JSON string from FormData
     let parsedShifts = shifts;
     if (typeof shifts === 'string') {
       try { parsedShifts = JSON.parse(shifts); } catch { parsedShifts = []; }
     }
 
-    const imagePath = req.file ? `/uploads/employees/${req.file.filename}` : null;
+    // req.file.path is now the full Cloudinary URL
+    const imageUrl = req.file ? req.file.path : null;
 
     const employee = await Employee.create({
-      empId,
-      name,
-      email,
-      department,
+      empId, name, email, department,
       site_id: finalSiteId,
       shifts: parsedShifts,
-      role,
-      status,
-      is_registered,
-      phone,
-      cnic,
-      image: imagePath,
+      role, status, is_registered, phone, cnic,
+      image: imageUrl,
     });
 
     await updateDepartmentCounts(department);
@@ -158,48 +124,41 @@ const createEmployee = async (req, res) => {
     const populatedEmployee = await Employee.findById(employee._id).populate('site_id', 'code name');
     res.status(201).json(populatedEmployee);
   } catch (error) {
-    if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+    if (req.file) await deleteImageFile(req.file.path);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Update an employee
-// @route   PUT /api/employees/:id
-// @access  Private (Super Admin / Site Admin)
+// @desc    Update employee
 const updateEmployee = async (req, res) => {
   try {
     const employee = await Employee.findById(req.params.id);
-
     if (!employee) {
-      if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+      if (req.file) await deleteImageFile(req.file.path);
       return res.status(404).json({ message: 'Employee not found' });
     }
 
     if (req.user.role === 'site_admin' && employee.site_id.toString() !== req.user.site_id.toString()) {
-      if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+      if (req.file) await deleteImageFile(req.file.path);
       return res.status(403).json({ message: 'Access denied: Employee not in your site' });
     }
 
-    // Validate phone if provided
     if (req.body.phone !== undefined && req.body.phone !== '') {
       if (!isValidPhone(req.body.phone)) {
-        if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+        if (req.file) await deleteImageFile(req.file.path);
         return res.status(400).json({ message: 'Phone must be in format: +92 3XX-XXXXXXX' });
       }
     }
 
-    // Validate CNIC if provided
     if (req.body.cnic !== undefined && req.body.cnic !== '') {
       if (!isValidCnic(req.body.cnic)) {
-        if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+        if (req.file) await deleteImageFile(req.file.path);
         return res.status(400).json({ message: 'CNIC must be in format: 12345-6789012-3' });
       }
-
-      // Check CNIC uniqueness (if changed)
       if (req.body.cnic !== employee.cnic) {
         const cnicExists = await Employee.findOne({ cnic: req.body.cnic, _id: { $ne: employee._id } });
         if (cnicExists) {
-          if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+          if (req.file) await deleteImageFile(req.file.path);
           return res.status(400).json({ message: 'CNIC already exists' });
         }
       }
@@ -210,10 +169,9 @@ const updateEmployee = async (req, res) => {
 
     // If new image uploaded, delete the old one
     if (req.file && employee.image) {
-      deleteImageFile(employee.image);
+      await deleteImageFile(employee.image);
     }
 
-    // Parse shifts if it came as a JSON string
     let parsedShifts = req.body.shifts;
     if (typeof parsedShifts === 'string') {
       try { parsedShifts = JSON.parse(parsedShifts); } catch { parsedShifts = employee.shifts; }
@@ -232,16 +190,15 @@ const updateEmployee = async (req, res) => {
     employee.phone = req.body.phone !== undefined ? req.body.phone : employee.phone;
     employee.cnic = req.body.cnic !== undefined ? req.body.cnic : employee.cnic;
 
+    // New image? Use Cloudinary URL
     if (req.file) {
-      if (employee.image) {
-        deleteImageFile(employee.image);
-      }
-      employee.image = `/uploads/employees/${req.file.filename}`;
+      if (employee.image) await deleteImageFile(employee.image);
+      employee.image = req.file.path;
     } else if (req.body.removeImage === 'true' && employee.image) {
-      deleteImageFile(employee.image);
+      await deleteImageFile(employee.image);
       employee.image = null;
     }
-    
+
     const updatedEmployee = await employee.save();
 
     if (oldDepartment !== newDepartment) {
@@ -254,33 +211,28 @@ const updateEmployee = async (req, res) => {
     const populatedEmployee = await Employee.findById(updatedEmployee._id).populate('site_id', 'code name');
     res.json(populatedEmployee);
   } catch (error) {
-    if (req.file) deleteImageFile(`/uploads/employees/${req.file.filename}`);
+    if (req.file) await deleteImageFile(req.file.path);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Delete an employee
-// @route   DELETE /api/employees/:id
-// @access  Private (Super Admin only)
+// @desc    Delete employee
 const deleteEmployee = async (req, res) => {
   try {
     const employee = await Employee.findById(req.params.id);
-
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
+    if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
     if (req.user.role === 'site_admin' && employee.site_id.toString() !== req.user.site_id.toString()) {
       return res.status(403).json({ message: 'Access denied: Employee not in your site' });
     }
 
     const departmentName = employee.department;
-    const imagePath = employee.image;
+    const imageUrl = employee.image;
 
     await employee.deleteOne();
 
-    if (imagePath) {
-      deleteImageFile(imagePath);
+    if (imageUrl) {
+      await deleteImageFile(imageUrl);
     }
 
     await updateDepartmentCounts(departmentName);

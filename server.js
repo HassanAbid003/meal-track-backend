@@ -87,27 +87,60 @@ app.get('/api/health', (req, res) => {
 
 
 
-// ─── Serve Frontend (React build) ─────────────────────────────────
+// ============================================================
+// SERVE FRONTEND (must come AFTER API routes, BEFORE SPA fallback)
+// ============================================================
 const publicDir = path.join(__dirname, 'public');
 const indexHtml = path.join(publicDir, 'index.html');
 
+console.log('📁 publicDir:', publicDir);
+console.log('📁 publicDir exists:', fs.existsSync(publicDir));
 if (fs.existsSync(publicDir)) {
-  // Serve static assets (JS, CSS, images)
+  console.log('📁 public/ contents:', fs.readdirSync(publicDir));
+  const assetsDir = path.join(publicDir, 'assets');
+  if (fs.existsSync(assetsDir)) {
+    console.log('📁 assets/ contents:', fs.readdirSync(assetsDir));
+  } else {
+    console.log('❌ assets/ folder NOT FOUND');
+  }
+}
+
+if (fs.existsSync(publicDir)) {
+  // 1. Explicit /assets route with correct MIME types — takes precedence
+  app.use('/assets', express.static(path.join(publicDir, 'assets'), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.js')) {
+        res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      } else if (filePath.endsWith('.css')) {
+        res.setHeader('Content-Type', 'text/css; charset=utf-8');
+      } else if (filePath.endsWith('.png')) {
+        res.setHeader('Content-Type', 'image/png');
+      } else if (filePath.endsWith('.svg')) {
+        res.setHeader('Content-Type', 'image/svg+xml');
+      } else if (filePath.endsWith('.woff2')) {
+        res.setHeader('Content-Type', 'font/woff2');
+      }
+    },
+  }));
+
+  // 2. Everything else from public/
   app.use(express.static(publicDir));
 
-  // SPA fallback — any non-API route serves index.html
+  // 3. SPA fallback — HARD EXCLUDE asset paths and file extensions
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/uploads') ||
+      req.path.startsWith('/assets/') ||
+      /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|map|json)$/i.test(req.path)
+    ) {
       return next();
     }
     res.sendFile(indexHtml);
   });
 
   console.log(`✅ Serving frontend from ${publicDir}`);
-} else {
-  console.warn(`⚠️  public/ folder not found at ${publicDir}. Frontend will not be served.`);
 }
-
 
 
 

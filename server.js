@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const cookieParser = require('cookie-parser');
+const fs = require('fs');
 require('dotenv').config();
 
 // Routes
@@ -82,6 +83,36 @@ app.use('/api/users', userRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
+
+
+
+
+// ─── Serve Frontend (React build) ─────────────────────────────────
+const publicDir = path.join(__dirname, 'public');
+const indexHtml = path.join(publicDir, 'index.html');
+
+if (fs.existsSync(publicDir)) {
+  // Serve static assets (JS, CSS, images)
+  app.use(express.static(publicDir));
+
+  // SPA fallback — any non-API route serves index.html
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+      return next();
+    }
+    res.sendFile(indexHtml);
+  });
+
+  console.log(`✅ Serving frontend from ${publicDir}`);
+} else {
+  console.warn(`⚠️  public/ folder not found at ${publicDir}. Frontend will not be served.`);
+}
+
+
+
+
+
+
 
 // ─── Start Server ─────────────────────────────────────────────────
 mongoose.connect(process.env.MONGODB_URI)

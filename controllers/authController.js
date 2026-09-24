@@ -9,21 +9,12 @@ const generateToken = (id) => {
 };
 
 // Cookie options (shared between login and logout)
-// const cookieOptions = {
-//   httpOnly: true,
-//   secure: process.env.NODE_ENV === 'production',
-//   sameSite: 'lax',
-//   maxAge: 7 * 24 * 60 * 60 * 1000,
-//   path: '/',
-// };
-
-// Cookie options (shared between login and logout)
 const isProduction = process.env.NODE_ENV === 'production';
 
 const cookieOptions = {
   httpOnly: true,
-  secure: isProduction,                           // true on Railway HTTPS
-  sameSite: isProduction ? 'none' : 'lax',        // 'none' for cross-domain
+  secure: isProduction,                           
+  sameSite: 'lax',     
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: '/',
 };
@@ -62,7 +53,8 @@ const registerUser = async (req, res) => {
       res.status(400).json({ message: 'Invalid user data' });
     }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('registerUser error:', error);
+    res.status(500).json({ message: 'Something went wrong' });
   }
 };
 
@@ -104,28 +96,17 @@ const loginUser = async (req, res) => {
       res.status(401).json({ message: 'Invalid email or password' });
     }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('loginUser error:', error);
+    res.status(500).json({ message: 'Something went wrong' });
   }
 };
 
-// @desc    Logout user (clear cookie)
-// @route   POST /api/auth/logout
-// @access  Public
-// const logoutUser = async (req, res) => {
-//   res.clearCookie('auth_token', {
-//     httpOnly: true,
-//     secure: process.env.NODE_ENV === 'production',
-//     sameSite: 'lax',
-//     path: '/',
-//   });
-//   res.json({ message: 'Logged out successfully' });
-// };
 
 const logoutUser = async (req, res) => {
   res.clearCookie('auth_token', {
     httpOnly: true,
     secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
+    sameSite: 'lax',
     path: '/',
   });
   res.json({ message: 'Logged out successfully' });

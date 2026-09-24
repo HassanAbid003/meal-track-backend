@@ -31,7 +31,7 @@ const allowedOrigins = [
   'http://localhost:8081',
   'http://192.168.1.39:8081',
   'https://meal-track-system.netlify.app',
-  'https://meal-track-backend-production.up.railway.app',   // ← ADD THIS
+  'https://meal-track-backend-production.up.railway.app', 
 
 ];
 

@@ -217,6 +217,13 @@ const resetPassword = async (req, res) => {
 
     await user.save();
 
+    res.clearCookie('auth_token', {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'lax',
+      path: '/',
+    });
+
     return res.status(200).json({ message: 'Password reset successful' });
   } catch (error) {
     console.error('resetPassword error:', error);

@@ -16,6 +16,11 @@ const ScanSchema = new mongoose.Schema({
     ref: 'Site',
     required: true,
   },
+  user_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
   status: {
     type: String,
     enum: ['allowed', 'denied'],
@@ -27,7 +32,7 @@ const ScanSchema = new mongoose.Schema({
   },
   shift: {
     type: String,
-    default: null,   // 'Breakfast' | 'Lunch' | 'Dinner' | null
+    default: null,
   },
 }, { timestamps: true });
 

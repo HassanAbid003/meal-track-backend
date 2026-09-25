@@ -8,12 +8,13 @@ const Shift = require('../models/Shift');
 // @access  Public (Mess Keeper / Scanner device)
 const verifyScan = async (req, res) => {
   const { barcode, device_serial } = req.body;
+  const scanningUserId = req.user?._id || null;
 
-  console.log('🔵 Scan request:', { barcode, device_serial });
-
+  console.log('🔵 Scan request:', { barcode, device_serial, scanningUserId });
   try {
-    // 1. Find the Device
-    const device = await Device.findOne({ serial: device_serial }).populate('site_id', 'name code');
+
+  // 1. Find the Device
+  const device = await Device.findOne({ serial: device_serial }).populate('site_id', 'name code');
 
     if (!device) {
       console.log('❌ Device not found:', device_serial);
@@ -63,6 +64,7 @@ const verifyScan = async (req, res) => {
         employee_id: null,
         device_id: device._id,
         site_id: device.site_id,
+        user_id: scanningUserId,  
         status: 'denied',
         reason: 'Employee not found',
         shift: null,
@@ -81,6 +83,7 @@ const verifyScan = async (req, res) => {
         employee_id: employee._id,
         device_id: device._id,
         site_id: device.site_id,
+        user_id: scanningUserId,       
         status: 'denied',
         reason: 'Employee not registered',
         shift: null,
@@ -97,6 +100,7 @@ const verifyScan = async (req, res) => {
         employee_id: employee._id,
         device_id: device._id,
         site_id: device.site_id,
+        user_id: scanningUserId,
         status: 'denied',
         reason: 'Employee not assigned to this site',
         shift: null,
@@ -123,6 +127,7 @@ const verifyScan = async (req, res) => {
         employee_id: employee._id,
         device_id: device._id,
         site_id: device.site_id,
+        user_id: scanningUserId,
         status: 'denied',
         reason: 'Outside shift hours',
         shift: null,
@@ -133,7 +138,7 @@ const verifyScan = async (req, res) => {
 
     console.log('✅ Active shift found:', activeShift.name);
 
-    // 6. Check if the employee is assigned to this shift
+  // 6. Check if the employee is assigned to this shift
   const employeeShifts = Array.isArray(employee.shifts) ? employee.shifts : [];
 
     if (!employeeShifts.includes(activeShift.name)) {
@@ -143,6 +148,7 @@ const verifyScan = async (req, res) => {
         employee_id: employee._id,
         device_id: device._id,
         site_id: device.site_id,
+        user_id: scanningUserId,
         status: 'denied',
         reason: `Not assigned to ${activeShift.name} shift`,
         shift: activeShift.name,
@@ -160,6 +166,7 @@ const verifyScan = async (req, res) => {
       employee_id: employee._id,
       device_id: device._id,
       site_id: device.site_id,
+      user_id: scanningUserId,
       status: 'allowed',
       reason: '',
       shift: activeShift.name,
@@ -208,6 +215,7 @@ const getRecentScans = async (req, res) => {
       .populate('employee_id', 'name empId department image')
       .populate('device_id', 'name serial')
       .populate('site_id', 'name code')
+      .populate('user_id', 'name email')      
       .sort({ createdAt: -1 })
       .limit(parsedLimit);
 

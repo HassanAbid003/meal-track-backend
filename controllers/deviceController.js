@@ -23,10 +23,24 @@ const getDevices = async (req, res) => {
 
     const devices = await Device.find(query).populate('site_id', 'name code');
 
-    // Enrich each device with computed isOnline field
+    // Look up Mess Keepers whose device_serial matches any returned device
+    const User = require('../models/User');
+    const serials = devices.map((d) => d.serial);
+    const keepers = await User.find({
+      role: 'mess_keeper',
+      device_serial: { $in: serials },
+    }).select('name email device_serial');
+
+    const keeperBySerial = {};
+    keepers.forEach((k) => {
+      keeperBySerial[k.device_serial] = { name: k.name, email: k.email };
+    });
+
+    // Enrich each device with isOnline + assignedTo
     const enriched = devices.map((d) => ({
       ...d.toObject(),
       isOnline: isDeviceOnline(d.lastPing),
+      assignedTo: keeperBySerial[d.serial] || null,
     }));
 
     res.json(enriched);
@@ -149,10 +163,69 @@ const deleteDevice = async (req, res) => {
   }
 };
 
+// @desc    Get the device assigned to the current Mess Keeper
+// @route   GET /api/devices/my-device
+// @access  Private (Mess Keeper only)
+const getMyDevice = async (req, res) => {
+  try {
+    if (req.user.role !== 'mess_keeper') {
+      return res.status(403).json({ message: 'Only Mess Keepers have an assigned device' });
+    }
+
+    if (!req.user.device_serial) {
+      return res.status(404).json({ message: 'No device assigned. Contact your admin.' });
+    }
+
+    const device = await Device.findOne({ serial: req.user.device_serial })
+      .populate('site_id', 'name code');
+
+    if (!device) {
+      return res.status(404).json({ message: 'Assigned device not found in system' });
+    }
+
+    res.json({
+      ...device.toObject(),
+      isOnline: isDeviceOnline(device.lastPing),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get devices not currently assigned to any Mess Keeper
+// @route   GET /api/devices/unassigned
+// @access  Private (Super Admin only)
+const getUnassignedDevices = async (req, res) => {
+  try {
+    const User = require('../models/User');
+
+    const assignedUsers = await User.find({
+      role: 'mess_keeper',
+      device_serial: { $ne: null },
+    }).select('device_serial');
+
+    const assignedSerials = assignedUsers.map((u) => u.device_serial);
+
+    const devices = await Device.find({ serial: { $nin: assignedSerials } })
+      .populate('site_id', 'name code');
+
+    const enriched = devices.map((d) => ({
+      ...d.toObject(),
+      isOnline: isDeviceOnline(d.lastPing),
+    }));
+
+    res.json(enriched);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getDevices,
   heartbeat,
   createDevice,
   updateDevice,
   deleteDevice,
+  getMyDevice,
+  getUnassignedDevices,
 };

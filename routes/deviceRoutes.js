@@ -10,7 +10,14 @@ router.use(protect);
 // Heartbeat — any authenticated user with a device
 router.post('/heartbeat', deviceController.heartbeat);
 
-// Any logged-in user can list their site's devices (mobile app needs this)
+// Assigned device for current Mess Keeper (mobile app uses this)
+// MUST come before /:id routes so 'my-device' isn't parsed as an ObjectId
+router.get('/my-device', deviceController.getMyDevice);
+
+// Devices not assigned to any Mess Keeper (admin Promote modal uses this)
+router.get('/unassigned', checkPageAccess('devices'), deviceController.getUnassignedDevices);
+
+// Any logged-in user can list their site's devices
 router.get('/', deviceController.getDevices);
 
 // Write operations require devices page access

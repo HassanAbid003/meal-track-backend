@@ -60,18 +60,31 @@ const protectAnyAuth = async (req, res, next) => {
     try {
       const decoded = jwt.verify(userToken, process.env.JWT_SECRET);
       req.user = await User.findById(decoded.id).select('-password');
-      if (req.user) return next();
+      if (req.user) {
+        console.log('🔍 protectAnyAuth: user auth OK →', req.user.email);
+        return next();
+      }
     } catch {
-      // fall through to pairing token
+      console.log('🔍 protectAnyAuth: user token failed, trying pairing');
     }
   }
 
   // 2. Try X-Pairing-Token (paired tablet)
   const pairingToken = req.headers['x-pairing-token'];
+
+  console.log('🔍 protectAnyAuth: header present?', !!pairingToken);
+  console.log('🔍 protectAnyAuth: all headers with x-', Object.keys(req.headers).filter(h => h.startsWith('x-')));
+
   if (pairingToken && typeof pairingToken === 'string') {
     const hash = crypto.createHash('sha256').update(pairingToken).digest('hex');
+
+    console.log('🔍 protectAnyAuth: token first 16:', pairingToken.substring(0, 16));
+    console.log('🔍 protectAnyAuth: hash first 16:', hash.substring(0, 16));
+
     const device = await Device.findOne({ pairingTokenHash: hash })
       .populate('site_id', 'name code');
+
+    console.log('🔍 protectAnyAuth: device found:', device ? device.name : 'null');
 
     if (device) {
       req.device = device;
@@ -79,6 +92,7 @@ const protectAnyAuth = async (req, res, next) => {
     }
   }
 
+  console.log('🔍 protectAnyAuth: rejecting — no user, no device');
   return res.status(401).json({ message: 'Not authorized' });
 };
 

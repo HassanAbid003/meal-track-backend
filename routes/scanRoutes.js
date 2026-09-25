@@ -4,19 +4,18 @@ const {
   getRecentScans,
   getWeeklyStats,
 } = require('../controllers/scanController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, protectAnyAuth } = require('../middleware/authMiddleware');
 const { checkPageAccess } = require('../middleware/pageAccessMiddleware');
 
 const router = express.Router();
 
-// Protected — Mess Keeper must be logged in (Bearer token)
-router.post('/', protect, verifyScan);
+// Scan — accepts cookie, Bearer, or X-Pairing-Token
+router.post('/', protectAnyAuth, verifyScan);
 
-// Recent scans — accessible to Super Admin, Site Admin, AND Mess Keeper
-// (controller handles role-based filtering)
+// Recent scans — user auth only (web panel)
 router.get('/recent', protect, getRecentScans);
 
-// Weekly stats — still admin-only
+// Weekly stats — admin only
 router.get('/stats/weekly', protect, checkPageAccess('reports'), getWeeklyStats);
 
 module.exports = router;

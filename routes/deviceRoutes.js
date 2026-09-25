@@ -1,28 +1,38 @@
 const express = require('express');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, protectAnyAuth } = require('../middleware/authMiddleware');
 const { checkPageAccess } = require('../middleware/pageAccessMiddleware');
 const deviceController = require('../controllers/deviceController');
 
 const router = express.Router();
 
+// ============================================================
+// PUBLIC — no auth required
+// ============================================================
+router.post('/pair', deviceController.pairDevice);
+
+// ============================================================
+// ANY AUTH — cookie, Bearer, OR pairing token
+// MUST come BEFORE router.use(protect) so protect doesn't block it
+// ============================================================
+router.post('/heartbeat', protectAnyAuth, deviceController.heartbeat);
+
+// ============================================================
+// USER AUTH REQUIRED (cookie or Bearer)
+// ============================================================
 router.use(protect);
 
-// Heartbeat — any authenticated user with a device
-router.post('/heartbeat', deviceController.heartbeat);
-
-// Assigned device for current Mess Keeper (mobile app uses this)
-// MUST come before /:id routes so 'my-device' isn't parsed as an ObjectId
+// Legacy endpoints (still supported during transition)
 router.get('/my-device', deviceController.getMyDevice);
-
-// Devices not assigned to any Mess Keeper (admin Promote modal uses this)
 router.get('/unassigned', checkPageAccess('devices'), deviceController.getUnassignedDevices);
-
-// Any logged-in user can list their site's devices
 router.get('/', deviceController.getDevices);
 
-// Write operations require devices page access
+// CRUD
 router.post('/', checkPageAccess('devices'), deviceController.createDevice);
 router.put('/:id', checkPageAccess('devices'), deviceController.updateDevice);
 router.delete('/:id', checkPageAccess('devices'), deviceController.deleteDevice);
+
+// Pairing management (admin only)
+router.post('/:id/pairing-code', checkPageAccess('devices'), deviceController.generatePairingCode);
+router.post('/:id/unpair', checkPageAccess('devices'), deviceController.unpairDevice);
 
 module.exports = router;

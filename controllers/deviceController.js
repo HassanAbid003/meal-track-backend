@@ -1,4 +1,5 @@
 const Device = require('../models/Device');
+const crypto = require('crypto');
 
 // Online threshold: 60 seconds
 const ONLINE_THRESHOLD_MS = 60 * 1000;
@@ -36,11 +37,13 @@ const getDevices = async (req, res) => {
       keeperBySerial[k.device_serial] = { name: k.name, email: k.email };
     });
 
-    // Enrich each device with isOnline + assignedTo
+    // Enrich each device with isOnline + assignedTo + isPaired + pairedAt
     const enriched = devices.map((d) => ({
       ...d.toObject(),
       isOnline: isDeviceOnline(d.lastPing),
       assignedTo: keeperBySerial[d.serial] || null,
+      isPaired: !!d.pairedAt,
+      pairedAt: d.pairedAt || null,
     }));
 
     res.json(enriched);
@@ -49,9 +52,9 @@ const getDevices = async (req, res) => {
   }
 };
 
-// @desc    Heartbeat from Mess Keeper mobile app
+// @desc    Heartbeat from paired tablet
 // @route   POST /api/devices/heartbeat
-// @access  Private
+// @access  Private (any auth)
 const heartbeat = async (req, res) => {
   try {
     const { device_serial } = req.body;
@@ -99,6 +102,8 @@ const createDevice = async (req, res) => {
     res.status(201).json({
       ...populated.toObject(),
       isOnline: isDeviceOnline(populated.lastPing),
+      isPaired: false,
+      pairedAt: null,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -135,6 +140,8 @@ const updateDevice = async (req, res) => {
     res.json({
       ...populated.toObject(),
       isOnline: isDeviceOnline(populated.lastPing),
+      isPaired: !!populated.pairedAt,
+      pairedAt: populated.pairedAt || null,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -163,7 +170,7 @@ const deleteDevice = async (req, res) => {
   }
 };
 
-// @desc    Get the device assigned to the current Mess Keeper
+// @desc    Get the device assigned to the current Mess Keeper (legacy)
 // @route   GET /api/devices/my-device
 // @access  Private (Mess Keeper only)
 const getMyDevice = async (req, res) => {
@@ -192,9 +199,9 @@ const getMyDevice = async (req, res) => {
   }
 };
 
-// @desc    Get devices not currently assigned to any Mess Keeper
+// @desc    Get devices not currently assigned to any Mess Keeper (legacy)
 // @route   GET /api/devices/unassigned
-// @access  Private (Super Admin only)
+// @access  Private
 const getUnassignedDevices = async (req, res) => {
   try {
     const User = require('../models/User');
@@ -220,6 +227,126 @@ const getUnassignedDevices = async (req, res) => {
   }
 };
 
+// ============================================================
+// NEW: Pairing endpoints
+// ============================================================
+
+// @desc    Generate a 6-digit pairing code for a device
+// @route   POST /api/devices/:id/pairing-code
+// @access  Private (requires devices page access)
+const generatePairingCode = async (req, res) => {
+  try {
+    const device = await Device.findById(req.params.id);
+    if (!device) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+
+    // Generate 6-digit numeric code: 100000-999999
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+
+    // Hash it
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    // 10-minute expiry
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+    device.pairingCodeHash = codeHash;
+    device.pairingCodeExpires = expiresAt;
+    await device.save();
+
+    console.log(`🔑 Pairing code generated for ${device.name} (expires ${expiresAt.toISOString()})`);
+
+    res.json({
+      code,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (error) {
+    console.error('generatePairingCode error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Exchange a pairing code for a long-lived pairing token
+// @route   POST /api/devices/pair
+// @access  Public
+const pairDevice = async (req, res) => {
+  try {
+    const { code } = req.body;
+
+    if (!code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ message: 'Invalid code format' });
+    }
+
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+
+    const device = await Device.findOne({
+      pairingCodeHash: codeHash,
+      pairingCodeExpires: { $gt: new Date() },
+    }).populate('site_id', 'name code');
+
+    if (!device) {
+      return res.status(400).json({ message: 'Invalid or expired code' });
+    }
+
+    // Generate 64-char hex token
+    const token = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+
+    // Replace any existing pairing (re-pairing kicks old tablet out)
+    device.pairingTokenHash = tokenHash;
+    device.pairedAt = new Date();
+    device.pairingCodeHash = null;
+    device.pairingCodeExpires = null;
+    await device.save();
+
+    console.log(`✅ Device ${device.name} paired at ${device.pairedAt.toISOString()}`);
+
+    res.json({
+      token,
+      device: {
+        _id: device._id,
+        name: device.name,
+        serial: device.serial,
+        site: device.site_id
+          ? {
+              _id: device.site_id._id,
+              code: device.site_id.code,
+              name: device.site_id.name,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error('pairDevice error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Unpair the tablet from a device
+// @route   POST /api/devices/:id/unpair
+// @access  Private (requires devices page access)
+const unpairDevice = async (req, res) => {
+  try {
+    const device = await Device.findById(req.params.id);
+    if (!device) {
+      return res.status(404).json({ message: 'Device not found' });
+    }
+
+    device.pairingTokenHash = null;
+    device.pairedAt = null;
+    device.pairingCodeHash = null;
+    device.pairingCodeExpires = null;
+    await device.save();
+
+    console.log(`🔓 Device ${device.name} unpaired`);
+
+    res.json({ message: 'Device unpaired', device });
+  } catch (error) {
+    console.error('unpairDevice error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getDevices,
   heartbeat,
@@ -228,4 +355,7 @@ module.exports = {
   deleteDevice,
   getMyDevice,
   getUnassignedDevices,
+  generatePairingCode,
+  pairDevice,
+  unpairDevice,
 };

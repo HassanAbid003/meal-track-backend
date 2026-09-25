@@ -8,16 +8,31 @@ const Shift = require('../models/Shift');
 // @access  Public (Mess Keeper / Scanner device)
 const verifyScan = async (req, res) => {
   const { barcode, device_serial } = req.body;
+
+  // If authed via pairing token, device comes from req.device
+  // If authed via user token, device_serial comes from body
+  const serialToLookup = device_serial || req.device?.serial;
   const scanningUserId = req.user?._id || null;
 
-  console.log('🔵 Scan request:', { barcode, device_serial, scanningUserId });
-  try {
+  console.log('🔵 Scan request:', { barcode, device_serial, serialToLookup, scanningUserId });
 
-  // 1. Find the Device
-  const device = await Device.findOne({ serial: device_serial }).populate('site_id', 'name code');
+  try {
+    // 0. Require a device serial (either from body or req.device)
+    if (!serialToLookup) {
+      return res.status(400).json({
+        status: 'denied',
+        message: 'device_serial is required',
+        employee: null,
+        site: null,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 1. Find the Device
+    const device = await Device.findOne({ serial: serialToLookup }).populate('site_id', 'name code');
 
     if (!device) {
-      console.log('❌ Device not found:', device_serial);
+      console.log('❌ Device not found:', serialToLookup);
       return res.status(400).json({
         status: 'denied',
         message: 'Device not found',
@@ -26,7 +41,6 @@ const verifyScan = async (req, res) => {
         timestamp: new Date().toISOString(),
       });
     }
-
     const buildResponse = (status, message, employee) => ({
       status,
       message,
@@ -181,6 +195,8 @@ const verifyScan = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
 
 // @desc    Get recent scans
 // @route   GET /api/scan/recent

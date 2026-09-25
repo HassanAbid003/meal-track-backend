@@ -1,6 +1,11 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
+const Device = require('../models/Device');
 
+// ============================================================
+// protect — user auth only (cookie or Bearer)
+// ============================================================
 const protect = async (req, res, next) => {
   let token;
 
@@ -35,7 +40,51 @@ const protect = async (req, res, next) => {
   }
 };
 
-// Only allow Super Admin
+// ============================================================
+// protectAnyAuth — cookie, Bearer, or X-Pairing-Token
+// Attaches req.user (cookie/Bearer) OR req.device (pairing token)
+// ============================================================
+const protectAnyAuth = async (req, res, next) => {
+  // 1. Try user auth (cookie or Bearer)
+  let userToken = null;
+  if (req.cookies && req.cookies.auth_token) {
+    userToken = req.cookies.auth_token;
+  } else if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer ')
+  ) {
+    userToken = req.headers.authorization.split(' ')[1];
+  }
+
+  if (userToken) {
+    try {
+      const decoded = jwt.verify(userToken, process.env.JWT_SECRET);
+      req.user = await User.findById(decoded.id).select('-password');
+      if (req.user) return next();
+    } catch {
+      // fall through to pairing token
+    }
+  }
+
+  // 2. Try X-Pairing-Token (paired tablet)
+  const pairingToken = req.headers['x-pairing-token'];
+  if (pairingToken && typeof pairingToken === 'string') {
+    const hash = crypto.createHash('sha256').update(pairingToken).digest('hex');
+    const device = await Device.findOne({ pairingTokenHash: hash })
+      .populate('site_id', 'name code');
+
+    if (device) {
+      req.device = device;
+      return next();
+    }
+  }
+
+  return res.status(401).json({ message: 'Not authorized' });
+};
+
+// ============================================================
+// Role guards
+// ============================================================
 const superAdmin = (req, res, next) => {
   if (req.user && req.user.role === 'super_admin') {
     next();
@@ -44,7 +93,6 @@ const superAdmin = (req, res, next) => {
   }
 };
 
-// Only allow Site Admin
 const siteAdmin = (req, res, next) => {
   if (req.user && req.user.role === 'site_admin') {
     next();
@@ -53,4 +101,4 @@ const siteAdmin = (req, res, next) => {
   }
 };
 
-module.exports = { protect, superAdmin, siteAdmin };
+module.exports = { protect, protectAnyAuth, superAdmin, siteAdmin };

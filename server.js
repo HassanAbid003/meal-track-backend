@@ -23,7 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Trust Railway proxy so rate limiter reads real client IPs
-app.set('trust proxy', true);
+app.set('trust proxy', 1);
 
 // ─── CORS ──────────────────────────────────────────────────────────
 const allowedOrigins = [

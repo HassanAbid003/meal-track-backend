@@ -127,8 +127,7 @@ const verifyScan = async (req, res) => {
       return res.json(buildResponse('denied', 'Employee not assigned to this site', employee));
     }
 
-    // 5. Check if current time is within an active shift
-// 5. Check if current time is within an active shift (using Pakistan time)
+    // 5. Check if current time is within an active shift (using Pakistan time)
     const currentTime = new Intl.DateTimeFormat('en-GB', {
       timeZone: 'Asia/Karachi',
       hour: '2-digit',
@@ -136,7 +135,7 @@ const verifyScan = async (req, res) => {
       hour12: false,
     }).format(new Date());
     console.log('🕐 Current time (PKT):', currentTime);
-    
+
     const activeShift = await Shift.findOne({
       site_id: device.site_id,
       status: 'Active',
@@ -211,15 +210,16 @@ const verifyScan = async (req, res) => {
 
 // @desc    Get recent scans
 // @route   GET /api/scan/recent
-// @access  Private (Super Admin / Site Admin / Mess Keeper)
+// @access  Private (Super Admin / Site Admin / Mess Keeper / Paired Device)
 const getRecentScans = async (req, res) => {
   try {
     const { device_serial, limit } = req.query;
 
     let query = {};
 
-    // Role-based site filter
-    if (req.user.role === 'site_admin' || req.user.role === 'mess_keeper') {
+    // Role-based site filter — only applies when authenticated as a user.
+    // When auth comes from a pairing token, req.user is undefined — skip.
+    if (req.user && (req.user.role === 'site_admin' || req.user.role === 'mess_keeper')) {
       query.site_id = req.user.site_id;
     }
 
@@ -242,16 +242,6 @@ const getRecentScans = async (req, res) => {
       .populate('user_id', 'name email')
       .sort({ createdAt: -1 })
       .limit(parsedLimit);
-
-    if (scans[0]) {
-      console.log('📋 First scan shape:', JSON.stringify({
-        hasEmployee: !!scans[0].employee,
-        hasEmployeeId: !!scans[0].employee_id,
-        employeeIdType: typeof scans[0].employee_id,
-        employeeIdName: scans[0].employee_id?.name || null,
-        barcode: scans[0].barcode || null,
-      }));
-    }
 
     console.log(`✅ Found ${scans.length} recent scans (device_serial=${device_serial || 'any'})`);
     res.json(scans);
@@ -298,7 +288,8 @@ const getWeeklyStats = async (req, res) => {
       status: 'allowed',
     };
 
-    if (req.user.role === 'site_admin') {
+    // Role-based site filter — guard against missing req.user
+    if (req.user && req.user.role === 'site_admin') {
       matchQuery.site_id = req.user.site_id;
     }
 

@@ -14,7 +14,8 @@ router.post('/pair', deviceController.pairDevice);
 // ANY AUTH — cookie, Bearer, OR pairing token
 // MUST come BEFORE router.use(protect) so protect doesn't block it
 // ============================================================
-router.post('/heartbeat', protectAnyAuth, deviceController.heartbeat);
+router.post('/heartbeat',   protectAnyAuth, deviceController.heartbeat);
+router.post('/unpair-self', protectAnyAuth, deviceController.unpairSelf);
 
 // ============================================================
 // USER AUTH REQUIRED (cookie or Bearer)

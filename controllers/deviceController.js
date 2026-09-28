@@ -347,6 +347,31 @@ const unpairDevice = async (req, res) => {
   }
 };
 
+// @desc    Unpair the calling device (self-revoke)
+// @route   POST /api/devices/unpair-self
+// @access  Private (pairing token auth only)
+const unpairSelf = async (req, res) => {
+  try {
+    // req.device is set by protectAnyAuth when a valid pairing token was sent
+    if (!req.device) {
+      return res.status(401).json({ message: 'Not authenticated as a paired device' });
+    }
+
+    req.device.pairingTokenHash = null;
+    req.device.pairedAt = null;
+    req.device.pairingCodeHash = null;
+    req.device.pairingCodeExpires = null;
+    await req.device.save();
+
+    console.log(`🔓 Device ${req.device.name} (${req.device.serial}) self-unpaired`);
+
+    res.json({ message: 'Device unpaired' });
+  } catch (error) {
+    console.error('unpairSelf error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getDevices,
   heartbeat,
@@ -358,4 +383,5 @@ module.exports = {
   generatePairingCode,
   pairDevice,
   unpairDevice,
+  unpairSelf,
 };

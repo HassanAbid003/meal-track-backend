@@ -19,6 +19,8 @@ const userRoutes = require('./routes/userRoutes');
 
 // Middleware
 const { apiLimiter } = require('./middleware/rateLimitMiddleware');
+const { seedCounterIfNeeded } = require('./utils/nextEmpId');
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -234,8 +236,16 @@ if (fs.existsSync(publicDir)) {
 
 
 // ─── Start Server ─────────────────────────────────────────────────
+// ─── Start Server ─────────────────────────────────────────────────
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ MongoDB Connected'))
+  .then(async () => {
+    console.log('✅ MongoDB Connected');
+    try {
+      await seedCounterIfNeeded();
+    } catch (err) {
+      console.error('❌ Counter seed failed:', err.message);
+    }
+  })
   .catch((err) => console.error('❌ MongoDB Connection Error:', err));
 
 app.listen(PORT, '0.0.0.0', () => {

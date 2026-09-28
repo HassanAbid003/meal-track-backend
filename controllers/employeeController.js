@@ -1,6 +1,7 @@
 const Employee = require('../models/Employee');
 const Department = require('../models/Department');
 const cloudinary = require('cloudinary').v2;
+const { peekNextEmpId, consumeNextEmpId } = require('../utils/nextEmpId');   
 
 // Helper: update department counts
 const updateDepartmentCounts = async (departmentName) => {
@@ -80,8 +81,12 @@ const getEmployeeById = async (req, res) => {
 };
 
 // @desc    Create employee
+// @desc    Create employee
 const createEmployee = async (req, res) => {
-  const { empId, name, email, department, site_id, shifts, role, status, is_registered, phone, cnic } = req.body;
+  const {
+    empId: rawEmpId, name, email, department, site_id,
+    shifts, role, status, is_registered, phone, cnic,
+  } = req.body;
 
   try {
     if (!phone || !isValidPhone(phone)) {
@@ -93,11 +98,37 @@ const createEmployee = async (req, res) => {
       return res.status(400).json({ message: 'CNIC must be in format: 12345-6789012-3' });
     }
 
-    const employeeExists = await Employee.findOne({ $or: [{ empId }, { email }, { cnic }] });
-    if (employeeExists) {
+    // ── empId handling ────────────────────────────────────────────
+    // If admin typed an empId, use it (but verify uniqueness below).
+    // If empty, auto-generate atomically.
+    let empId = rawEmpId && String(rawEmpId).trim()
+      ? String(rawEmpId).trim().toUpperCase()
+      : await consumeNextEmpId();
+
+    // Check for duplicates — one query covers empId, email, and cnic.
+    const duplicate = await Employee.findOne({
+      $or: [
+        { empId },
+        { email },
+        { cnic },
+      ],
+    });
+
+    if (duplicate) {
       if (req.file) await deleteImageFile(req.file.path);
-      return res.status(400).json({ message: 'Employee ID, Email, or CNIC already exists' });
+
+      // Figure out which field collided, for a precise error message
+      let conflictField = 'Employee';
+      if (duplicate.empId === empId) conflictField = 'Employee ID';
+      else if (duplicate.email === email) conflictField = 'Email';
+      else if (duplicate.cnic === cnic) conflictField = 'CNIC';
+
+      return res.status(400).json({
+        message: `${conflictField} already exists`,
+        field: conflictField.toLowerCase().replace(' ', '_'),
+      });
     }
+    // ─────────────────────────────────────────────────────────────
 
     let finalSiteId = site_id;
     if (req.user.role === 'site_admin') finalSiteId = req.user.site_id;
@@ -108,7 +139,6 @@ const createEmployee = async (req, res) => {
       try { parsedShifts = JSON.parse(shifts); } catch { parsedShifts = []; }
     }
 
-    // req.file.path is now the full Cloudinary URL
     const imageUrl = req.file ? req.file.path : null;
 
     const employee = await Employee.create({
@@ -177,7 +207,21 @@ const updateEmployee = async (req, res) => {
       try { parsedShifts = JSON.parse(parsedShifts); } catch { parsedShifts = employee.shifts; }
     }
 
-    employee.empId = req.body.empId || employee.empId;
+    // empId edit — verify uniqueness if it changed
+    if (req.body.empId && req.body.empId !== employee.empId) {
+      const newEmpId = String(req.body.empId).trim().toUpperCase();
+      const empIdTaken = await Employee.findOne({ empId: newEmpId, _id: { $ne: employee._id } });
+      if (empIdTaken) {
+        if (req.file) await deleteImageFile(req.file.path);
+        return res.status(400).json({
+          message: 'Employee ID already exists',
+          field: 'emp_id',
+        });
+      }
+      employee.empId = newEmpId;
+    }
+
+    // employee.empId = req.body.empId || employee.empId;
     employee.name = req.body.name || employee.name;
     employee.email = req.body.email || employee.email;
     employee.department = req.body.department || employee.department;
@@ -243,4 +287,16 @@ const deleteEmployee = async (req, res) => {
   }
 };
 
-module.exports = { getEmployees, getEmployeeById, createEmployee, updateEmployee, deleteEmployee };
+// @desc    Peek at the next auto-generated employee ID (does not consume it)
+// @route   GET /api/employees/next-id
+// @access  Private (requires employees page access)
+const getNextEmpId = async (req, res) => {
+  try {
+    const next = await peekNextEmpId();
+    res.json({ next });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getEmployees, getEmployeeById,  getNextEmpId, createEmployee, updateEmployee, deleteEmployee };

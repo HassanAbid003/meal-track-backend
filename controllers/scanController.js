@@ -237,6 +237,16 @@ const getRecentScans = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(parsedLimit);
 
+    if (scans[0]) {
+      console.log('📋 First scan shape:', JSON.stringify({
+        hasEmployee: !!scans[0].employee,
+        hasEmployeeId: !!scans[0].employee_id,
+        employeeIdType: typeof scans[0].employee_id,
+        employeeIdName: scans[0].employee_id?.name || null,
+        barcode: scans[0].barcode || null,
+      }));
+    }
+
     console.log(`✅ Found ${scans.length} recent scans (device_serial=${device_serial || 'any'})`);
     res.json(scans);
   } catch (error) {

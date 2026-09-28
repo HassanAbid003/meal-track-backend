@@ -5,6 +5,7 @@ const ScanSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Employee',
     required: false,
+    default: null,
   },
   device_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -19,6 +20,10 @@ const ScanSchema = new mongoose.Schema({
   user_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
+    default: null,
+  },
+  barcode: {
+    type: String,
     default: null,
   },
   status: {

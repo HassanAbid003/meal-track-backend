@@ -41,6 +41,7 @@ const verifyScan = async (req, res) => {
         timestamp: new Date().toISOString(),
       });
     }
+
     const buildResponse = (status, message, employee) => ({
       status,
       message,
@@ -78,7 +79,8 @@ const verifyScan = async (req, res) => {
         employee_id: null,
         device_id: device._id,
         site_id: device.site_id,
-        user_id: scanningUserId,  
+        user_id: scanningUserId,
+        barcode,
         status: 'denied',
         reason: 'Employee not found',
         shift: null,
@@ -97,7 +99,8 @@ const verifyScan = async (req, res) => {
         employee_id: employee._id,
         device_id: device._id,
         site_id: device.site_id,
-        user_id: scanningUserId,       
+        user_id: scanningUserId,
+        barcode,
         status: 'denied',
         reason: 'Employee not registered',
         shift: null,
@@ -115,6 +118,7 @@ const verifyScan = async (req, res) => {
         device_id: device._id,
         site_id: device.site_id,
         user_id: scanningUserId,
+        barcode,
         status: 'denied',
         reason: 'Employee not assigned to this site',
         shift: null,
@@ -142,6 +146,7 @@ const verifyScan = async (req, res) => {
         device_id: device._id,
         site_id: device.site_id,
         user_id: scanningUserId,
+        barcode,
         status: 'denied',
         reason: 'Outside shift hours',
         shift: null,
@@ -152,8 +157,8 @@ const verifyScan = async (req, res) => {
 
     console.log('✅ Active shift found:', activeShift.name);
 
-  // 6. Check if the employee is assigned to this shift
-  const employeeShifts = Array.isArray(employee.shifts) ? employee.shifts : [];
+    // 6. Check if the employee is assigned to this shift
+    const employeeShifts = Array.isArray(employee.shifts) ? employee.shifts : [];
 
     if (!employeeShifts.includes(activeShift.name)) {
       console.log('❌ Employee not assigned to this shift:', employee.name, '| shift:', activeShift.name);
@@ -163,6 +168,7 @@ const verifyScan = async (req, res) => {
         device_id: device._id,
         site_id: device.site_id,
         user_id: scanningUserId,
+        barcode,
         status: 'denied',
         reason: `Not assigned to ${activeShift.name} shift`,
         shift: activeShift.name,
@@ -181,6 +187,7 @@ const verifyScan = async (req, res) => {
       device_id: device._id,
       site_id: device.site_id,
       user_id: scanningUserId,
+      barcode,
       status: 'allowed',
       reason: '',
       shift: activeShift.name,
@@ -196,11 +203,6 @@ const verifyScan = async (req, res) => {
   }
 };
 
-
-
-// @desc    Get recent scans
-// @route   GET /api/scan/recent
-// @access  Private (Super Admin / Site Admin)
 // @desc    Get recent scans
 // @route   GET /api/scan/recent
 // @access  Private (Super Admin / Site Admin / Mess Keeper)
@@ -231,7 +233,7 @@ const getRecentScans = async (req, res) => {
       .populate('employee_id', 'name empId department image')
       .populate('device_id', 'name serial')
       .populate('site_id', 'name code')
-      .populate('user_id', 'name email')      
+      .populate('user_id', 'name email')
       .sort({ createdAt: -1 })
       .limit(parsedLimit);
 
@@ -251,22 +253,16 @@ const getWeeklyStats = async (req, res) => {
     const TZ = 'Asia/Karachi';
     const days = 7;
 
-    // Build 7-day range starting 6 days ago (in Pakistan time)
-    // Using UTC-based math on the current moment, then bucketing by PKT
     const now = new Date();
-    // "Today" in Pakistan — expressed as a plain YYYY-MM-DD string
     const todayPKT = new Intl.DateTimeFormat('en-CA', {
       timeZone: TZ,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-    }).format(now); // e.g. "2026-09-19"
+    }).format(now);
 
-    // Build the list of the last 7 days as YYYY-MM-DD strings (Pakistan time)
-    // We anchor to today PKT and walk backwards.
     const bucketKeys = [];
     for (let i = days - 1; i >= 0; i--) {
-      // Use a Date at noon UTC so that shifting days doesn't accidentally land on a different day
       const anchor = new Date(`${todayPKT}T12:00:00Z`);
       anchor.setUTCDate(anchor.getUTCDate() - i);
       const key = new Intl.DateTimeFormat('en-CA', {
@@ -278,10 +274,7 @@ const getWeeklyStats = async (req, res) => {
       bucketKeys.push(key);
     }
 
-    // Earliest day in the window (as a Date at 00:00 PKT)
-    // We approximate by taking the earliest key and shifting back 5 hours (UTC+5)
     const earliestKey = bucketKeys[0];
-    // PKT midnight = 19:00 UTC the previous day
     const sinceUTC = new Date(`${earliestKey}T00:00:00+05:00`);
 
     const matchQuery = {
@@ -293,7 +286,6 @@ const getWeeklyStats = async (req, res) => {
       matchQuery.site_id = req.user.site_id;
     }
 
-    // Aggregate by Pakistan-local date + shift
     const pipeline = [
       { $match: matchQuery },
       {
@@ -309,23 +301,20 @@ const getWeeklyStats = async (req, res) => {
 
     const raw = await Scan.aggregate(pipeline);
 
-    // Initialize all buckets with zeros
     const buckets = {};
     bucketKeys.forEach((key) => {
       buckets[key] = { breakfast: 0, lunch: 0, dinner: 0 };
     });
 
-    // Populate counts from aggregation
     raw.forEach((row) => {
       const date = row._id.date;
       const shift = row._id.shift;
-      if (!buckets[date]) return; // out of window
+      if (!buckets[date]) return;
       if (shift === 'Breakfast') buckets[date].breakfast = row.count;
       else if (shift === 'Lunch') buckets[date].lunch = row.count;
       else if (shift === 'Dinner') buckets[date].dinner = row.count;
     });
 
-    // Return ordered array (oldest → newest)
     const result = Object.entries(buckets).map(([date, counts]) => ({
       date,
       ...counts,

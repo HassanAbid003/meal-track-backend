@@ -26,4 +26,15 @@ const ShiftSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// ─── Index ────────────────────────────────────────────────────────
+// verifyScan runs this query on every single scan:
+//   Shift.findOne({
+//     site_id: device.site_id,
+//     status: 'Active',
+//     start_time: { $lte: currentTime },
+//     end_time:   { $gte: currentTime },
+//   })
+// This compound index makes it a single index seek instead of a collection scan.
+ShiftSchema.index({ site_id: 1, status: 1, start_time: 1, end_time: 1 });
+
 module.exports = mongoose.model('Shift', ShiftSchema);

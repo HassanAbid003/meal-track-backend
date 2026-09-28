@@ -41,4 +41,18 @@ const ScanSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// ─── Indexes ──────────────────────────────────────────────────────
+// getRecentScans: filter by device + sort by createdAt desc
+ScanSchema.index({ device_id: 1, createdAt: -1 });
+
+// getRecentScans (site-scoped): site_admin / mess_keeper filter
+ScanSchema.index({ site_id: 1, createdAt: -1 });
+
+// Duplicate scan check in verifyScan: employee + shift + status + today's date
+ScanSchema.index({ employee_id: 1, shift: 1, status: 1, createdAt: -1 });
+
+// getWeeklyStats: status=allowed + date range, optionally site
+ScanSchema.index({ status: 1, createdAt: -1 });
+ScanSchema.index({ site_id: 1, status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Scan', ScanSchema);

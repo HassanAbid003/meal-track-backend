@@ -3,18 +3,40 @@ const Device = require('../models/Device');
 const Scan = require('../models/Scan');
 const Shift = require('../models/Shift');
 
+// ─── Helpers ─────────────────────────────────────────────────────
+/**
+ * Normalize a barcode coming off the scanner.
+ * Handles common misreads:
+ *  - Trailing \r or \n from the scanner's terminator
+ *  - Leading/trailing whitespace
+ *  - Control characters (\x00-\x1F, \x7F)
+ *  - Case inconsistencies
+ */
+function normalizeBarcode(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/[\x00-\x1F\x7F]/g, '') // strip control chars including \r \n \t
+    .trim()
+    .toUpperCase();
+}
+
 // @desc    Verify an employee scan
 // @route   POST /api/scan
 // @access  Public (Mess Keeper / Scanner device)
 const verifyScan = async (req, res) => {
-  const { barcode, device_serial } = req.body;
+  const { barcode: rawBarcode, device_serial } = req.body;
 
-  // If authed via pairing token, device comes from req.device
-  // If authed via user token, device_serial comes from body
+  const barcode = normalizeBarcode(rawBarcode);
   const serialToLookup = device_serial || req.device?.serial;
   const scanningUserId = req.user?._id || null;
 
-  console.log('🔵 Scan request:', { barcode, device_serial, serialToLookup, scanningUserId });
+  console.log('🔵 Scan request:', {
+    raw: JSON.stringify(rawBarcode),
+    normalized: JSON.stringify(barcode),
+    device_serial,
+    serialToLookup,
+    scanningUserId,
+  });
 
   try {
     // 0. Require a device serial (either from body or req.device)
@@ -22,6 +44,17 @@ const verifyScan = async (req, res) => {
       return res.status(400).json({
         status: 'denied',
         message: 'device_serial is required',
+        employee: null,
+        site: null,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // 0b. Require a non-empty barcode
+    if (!barcode) {
+      return res.status(400).json({
+        status: 'denied',
+        message: 'Empty barcode',
         employee: null,
         site: null,
         timestamp: new Date().toISOString(),
@@ -70,21 +103,17 @@ const verifyScan = async (req, res) => {
     });
 
     // 2. Find the Employee by empId
-    const employee = await Employee.findOne({ empId: barcode });
+    // Use a case-insensitive exact match to tolerate minor inconsistencies
+    const employee = await Employee.findOne({
+      empId: { $regex: `^${barcode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
+    });
 
     if (!employee) {
       console.log('❌ Employee not found with empId:', barcode);
 
-      await Scan.create({
-        employee_id: null,
-        device_id: device._id,
-        site_id: device.site_id,
-        user_id: scanningUserId,
-        barcode,
-        status: 'denied',
-        reason: 'Employee not found',
-        shift: null,
-      }).catch(err => console.log('Could not create scan:', err.message));
+      // Do NOT create a Scan row for unreadable / unknown barcodes.
+      // These are scanner misreads, not real scan attempts.
+      // Logging them would clutter history and inflate counts.
 
       return res.status(404).json(buildResponse('denied', 'Employee not found', null));
     }
@@ -186,7 +215,44 @@ const verifyScan = async (req, res) => {
 
     console.log('✅ Employee assigned to shift:', activeShift.name);
 
-    // 7. If all checks pass, ALLOWED!
+    // 7. Duplicate check — has the employee already eaten during this shift today?
+    const startOfDayPKT = new Date(
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Karachi',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date()) + 'T00:00:00+05:00'
+    );
+
+    const existingScan = await Scan.findOne({
+      employee_id: employee._id,
+      site_id: device.site_id,
+      shift: activeShift.name,
+      status: 'allowed',
+      createdAt: { $gte: startOfDayPKT },
+    });
+
+    if (existingScan) {
+      console.log('❌ Duplicate scan:', employee.name, '| shift:', activeShift.name);
+
+      await Scan.create({
+        employee_id: employee._id,
+        device_id: device._id,
+        site_id: device.site_id,
+        user_id: scanningUserId,
+        barcode,
+        status: 'denied',
+        reason: `Already marked for ${activeShift.name}`,
+        shift: activeShift.name,
+      });
+
+      return res.json(
+        buildResponse('denied', `Already marked for ${activeShift.name}`, employee)
+      );
+    }
+
+    // 8. If all checks pass, ALLOWED!
     await Scan.create({
       employee_id: employee._id,
       device_id: device._id,
@@ -215,7 +281,10 @@ const getRecentScans = async (req, res) => {
   try {
     const { device_serial, limit } = req.query;
 
-    let query = {};
+    // Only return scans that were matched to a real employee.
+    // Misread / unknown-employee scans are not logged, but this is
+    // a defensive filter for any legacy rows.
+    let query = { employee_id: { $ne: null } };
 
     // Role-based site filter — only applies when authenticated as a user.
     // When auth comes from a pairing token, req.user is undefined — skip.

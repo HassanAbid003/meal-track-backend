@@ -128,9 +128,15 @@ const verifyScan = async (req, res) => {
     }
 
     // 5. Check if current time is within an active shift
-    const currentTime = new Date().toTimeString().slice(0, 5);
-    console.log('🕐 Current time:', currentTime);
-
+// 5. Check if current time is within an active shift (using Pakistan time)
+    const currentTime = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Karachi',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date());
+    console.log('🕐 Current time (PKT):', currentTime);
+    
     const activeShift = await Shift.findOne({
       site_id: device.site_id,
       status: 'Active',

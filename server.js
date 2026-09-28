@@ -35,6 +35,31 @@ const allowedOrigins = [
 
 ];
 
+// app.use(cors({
+//   origin: (origin, callback) => {
+//     // Allow requests with no origin (mobile apps, curl, Postman)
+//     if (!origin) return callback(null, true);
+
+//     // Explicit whitelist
+//     if (allowedOrigins.includes(origin)) return callback(null, true);
+
+//     // Allow localhost + LAN in dev
+//     if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+//       return callback(null, true);
+//     }
+
+//     // Allow any *.railway.app origin
+//     if (/^https:\/\/[a-z0-9-]+\.railway\.app$/.test(origin)) {
+//       return callback(null, true);
+//     }
+
+//     console.warn('CORS blocked origin:', origin);
+//     return callback(new Error(`CORS: origin ${origin} not allowed`));
+//   },
+//   credentials: true,
+// }));
+
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, Postman)
@@ -57,7 +82,20 @@ app.use(cors({
     return callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
+  // ─── THE FIX ──────────────────────────────────────────────────
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Pairing-Token',       // ← custom header used by scanner devices
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
+
+// Explicit preflight handler — Express 5 needs this
+app.options('*', cors());
+
+
+
 
 // ─── Body & Cookie Parsers ────────────────────────────────────────
 app.use(express.json());

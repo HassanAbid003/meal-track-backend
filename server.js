@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const fs = require('fs');
+const helmet = require('helmet');   
 require('dotenv').config();
 
 // Routes
@@ -26,14 +27,14 @@ const PORT = process.env.PORT || 5000;
 app.set('trust proxy', 1);
 
 // ─── CORS ──────────────────────────────────────────────────────────
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:8081',
-  'http://192.168.1.39:8081',
-  'https://meal-track-system.netlify.app',
-  'https://meal-track-backend-production.up.railway.app', 
+// const allowedOrigins = [
+//   'http://localhost:5173',
+//   'http://localhost:8081',
+//   'http://192.168.1.39:8081',
+//   'https://meal-track-system.netlify.app',
+//   'https://meal-track-backend-production.up.railway.app', 
 
-];
+// ];
 
 // app.use(cors({
 //   origin: (origin, callback) => {
@@ -60,21 +61,67 @@ const allowedOrigins = [
 // }));
 
 
+// app.use(cors({
+//   origin: (origin, callback) => {
+//     // Allow requests with no origin (mobile apps, curl, Postman)
+//     if (!origin) return callback(null, true);
+
+//     // Explicit whitelist
+//     if (allowedOrigins.includes(origin)) return callback(null, true);
+
+//     // Allow localhost + LAN in dev
+//     if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)) {
+//       return callback(null, true);
+//     }
+
+//     // Allow any *.railway.app origin
+//     if (/^https:\/\/[a-z0-9-]+\.railway\.app$/.test(origin)) {
+//       return callback(null, true);
+//     }
+
+//     console.warn('CORS blocked origin:', origin);
+//     return callback(new Error(`CORS: origin ${origin} not allowed`));
+//   },
+//   credentials: true,
+//   // ─── THE FIX ──────────────────────────────────────────────────
+//   allowedHeaders: [
+//     'Content-Type',
+//     'Authorization',
+//     'X-Pairing-Token',       // ← custom header used by scanner devices
+//   ],
+//   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+// }));
+
+// // Explicit preflight handler — Express 5 needs this
+// app.options('*', cors());
+
+
+// ─── CORS ──────────────────────────────────────────────────────────
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+const prodOrigins = [
+  'https://meal-track-system.netlify.app',
+  'https://meal-track-backend-production.up.railway.app',
+];
+
+const devOrigins = [
+  'http://localhost:5173',
+  'http://localhost:8081',
+  'http://192.168.1.39:8081',
+];
+
+const allowedOrigins = IS_PROD ? prodOrigins : [...prodOrigins, ...devOrigins];
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
 
-    // Explicit whitelist
+    // Strict whitelist
     if (allowedOrigins.includes(origin)) return callback(null, true);
 
-    // Allow localhost + LAN in dev
-    if (/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)) {
-      return callback(null, true);
-    }
-
-    // Allow any *.railway.app origin
-    if (/^https:\/\/[a-z0-9-]+\.railway\.app$/.test(origin)) {
+    // In dev only, allow LAN origins
+    if (!IS_PROD && /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+)(:\d+)?$/.test(origin)) {
       return callback(null, true);
     }
 
@@ -82,19 +129,18 @@ app.use(cors({
     return callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
-  // ─── THE FIX ──────────────────────────────────────────────────
   allowedHeaders: [
     'Content-Type',
     'Authorization',
-    'X-Pairing-Token',       // ← custom header used by scanner devices
+    'X-Pairing-Token',
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  maxAge: 86400,
 }));
 
-// Explicit preflight handler — Express 5 needs this
-app.options('*', cors());
-
-
+app.use(helmet({
+  contentSecurityPolicy: false,   // see note below
+}));
 
 
 // ─── Body & Cookie Parsers ────────────────────────────────────────

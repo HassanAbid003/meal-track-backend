@@ -27,11 +27,11 @@ app.set('trust proxy', 1);
 
 // ─── CORS ──────────────────────────────────────────────────────────
 const allowedOrigins = [
-  'http://localhost:5173/',
-  'http://localhost:8081/',
-  'http://192.168.1.39:8081/',
-  'https://meal-track-system.netlify.app/',
-  'https://meal-track-backend-production.up.railway.app/', 
+  'http://localhost:5173',
+  'http://localhost:8081',
+  'http://192.168.1.39:8081',
+  'https://meal-track-system.netlify.app',
+  'https://meal-track-backend-production.up.railway.app', 
 
 ];
 

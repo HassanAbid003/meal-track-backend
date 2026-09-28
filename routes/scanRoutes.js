@@ -13,7 +13,10 @@ const router = express.Router();
 router.post('/', protectAnyAuth, verifyScan);
 
 // Recent scans — user auth only (web panel)
-router.get('/recent', protect, getRecentScans);
+// router.get('/recent', protect, getRecentScans);
+router.get('/recent', protectAnyAuth, getRecentScans);
+
+
 
 // Weekly stats — admin only
 router.get('/stats/weekly', protect, checkPageAccess('reports'), getWeeklyStats);

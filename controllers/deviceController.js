@@ -1,4 +1,5 @@
 const Device = require('../models/Device');
+const Employee = require('../models/Employee');
 const crypto = require('crypto');
 
 // Online threshold: 60 seconds
@@ -24,17 +25,19 @@ const getDevices = async (req, res) => {
 
     const devices = await Device.find(query).populate('site_id', 'name code');
 
-    // Look up Mess Keepers whose device_serial matches any returned device
-    const User = require('../models/User');
+    // Look up Employees whose device_serial matches any returned device
     const serials = devices.map((d) => d.serial);
-    const keepers = await User.find({
-      role: 'mess_keeper',
+    const keepers = await Employee.find({
       device_serial: { $in: serials },
-    }).select('name email device_serial');
+    }).select('name email empId device_serial');
 
     const keeperBySerial = {};
     keepers.forEach((k) => {
-      keeperBySerial[k.device_serial] = { name: k.name, email: k.email };
+      keeperBySerial[k.device_serial] = {
+        name: k.name,
+        email: k.email,
+        empId: k.empId,
+      };
     });
 
     // Enrich each device with isOnline + assignedTo + isPaired + pairedAt
@@ -79,10 +82,7 @@ const heartbeat = async (req, res) => {
   }
 };
 
-// @desc    Create a new device
-// @route   POST /api/devices
-// @access  Private (Super Admin / Site Admin)
-// @desc    Create a new device
+// @desc    Create a new device (optionally assign an Employee as its Mess Keeper)
 // @route   POST /api/devices
 // @access  Private (Super Admin / Site Admin)
 const createDevice = async (req, res) => {
@@ -94,26 +94,25 @@ const createDevice = async (req, res) => {
       finalSiteId = req.user.site_id;
     }
 
-    // Optional: validate the mess keeper before creating the device
-    const User = require('../models/User');
+    // Optional: validate the employee before creating the device
     let keeper = null;
 
     if (mess_keeper_id) {
-      keeper = await User.findById(mess_keeper_id);
+      keeper = await Employee.findById(mess_keeper_id);
 
       if (!keeper) {
-        return res.status(404).json({ message: 'Mess Keeper not found' });
-      }
-      if (keeper.role !== 'mess_keeper') {
-        return res.status(400).json({ message: 'Selected user is not a Mess Keeper' });
+        return res.status(404).json({ message: 'Employee not found' });
       }
       if (keeper.site_id?.toString() !== finalSiteId?.toString()) {
-        return res.status(400).json({ message: 'Mess Keeper belongs to a different site' });
+        return res.status(400).json({ message: 'Employee belongs to a different site' });
       }
       if (keeper.device_serial) {
         return res.status(400).json({
-          message: `Mess Keeper already assigned to ${keeper.device_serial}`,
+          message: `Employee already assigned to ${keeper.device_serial}`,
         });
+      }
+      if (keeper.status !== 'Active') {
+        return res.status(400).json({ message: 'Employee is not active' });
       }
     }
 
@@ -125,11 +124,12 @@ const createDevice = async (req, res) => {
       status: status || 'online',
     });
 
-    // Assign the mess keeper to this device's serial (optional)
+    // Assign the employee as Mess Keeper of this device
     if (keeper) {
       keeper.device_serial = device.serial;
+      keeper.role = 'Mess Keeper';
       await keeper.save();
-      console.log(`🔗 Device ${device.serial} assigned to Mess Keeper ${keeper.name}`);
+      console.log(`🔗 Device ${device.serial} assigned to ${keeper.name} (${keeper.empId})`);
     }
 
     const populated = await Device.findById(device._id).populate('site_id', 'name code');
@@ -139,7 +139,7 @@ const createDevice = async (req, res) => {
       isPaired: false,
       pairedAt: null,
       assignedTo: keeper
-        ? { name: keeper.name, email: keeper.email }
+        ? { name: keeper.name, email: keeper.email, empId: keeper.empId }
         : null,
     });
   } catch (error) {
@@ -181,11 +181,19 @@ const updateDevice = async (req, res) => {
 
     const updated = await device.save();
     const populated = await Device.findById(updated._id).populate('site_id', 'name code');
+
+    // Re-fetch the assigned keeper for the response
+    const keeper = await Employee.findOne({ device_serial: populated.serial })
+      .select('name email empId device_serial');
+
     res.json({
       ...populated.toObject(),
       isOnline: isDeviceOnline(populated.lastPing),
       isPaired: !!populated.pairedAt,
       pairedAt: populated.pairedAt || null,
+      assignedTo: keeper
+        ? { name: keeper.name, email: keeper.email, empId: keeper.empId }
+        : null,
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -206,6 +214,12 @@ const deleteDevice = async (req, res) => {
     if (req.user.role !== 'super_admin') {
       return res.status(403).json({ message: 'Access denied: Super Admin only' });
     }
+
+    // Unassign any employee first
+    await Employee.updateMany(
+      { device_serial: device.serial },
+      { $set: { device_serial: null, role: 'Employee' } }
+    );
 
     await device.deleteOne();
     res.json({ message: 'Device removed' });
@@ -248,14 +262,11 @@ const getMyDevice = async (req, res) => {
 // @access  Private
 const getUnassignedDevices = async (req, res) => {
   try {
-    const User = require('../models/User');
-
-    const assignedUsers = await User.find({
-      role: 'mess_keeper',
+    const assignedEmployees = await Employee.find({
       device_serial: { $ne: null },
     }).select('device_serial');
 
-    const assignedSerials = assignedUsers.map((u) => u.device_serial);
+    const assignedSerials = assignedEmployees.map((e) => e.device_serial);
 
     const devices = await Device.find({ serial: { $nin: assignedSerials } })
       .populate('site_id', 'name code');
@@ -272,7 +283,7 @@ const getUnassignedDevices = async (req, res) => {
 };
 
 // ============================================================
-// NEW: Pairing endpoints
+// Pairing endpoints
 // ============================================================
 
 // @desc    Generate a 6-digit pairing code for a device
@@ -285,13 +296,8 @@ const generatePairingCode = async (req, res) => {
       return res.status(404).json({ message: 'Device not found' });
     }
 
-    // Generate 6-digit numeric code: 100000-999999
     const code = String(Math.floor(100000 + Math.random() * 900000));
-
-    // Hash it
     const codeHash = crypto.createHash('sha256').update(code).digest('hex');
-
-    // 10-minute expiry
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     device.pairingCodeHash = codeHash;
@@ -300,10 +306,7 @@ const generatePairingCode = async (req, res) => {
 
     console.log(`🔑 Pairing code generated for ${device.name} (expires ${expiresAt.toISOString()})`);
 
-    res.json({
-      code,
-      expiresAt: expiresAt.toISOString(),
-    });
+    res.json({ code, expiresAt: expiresAt.toISOString() });
   } catch (error) {
     console.error('generatePairingCode error:', error);
     res.status(500).json({ message: error.message });
@@ -332,11 +335,9 @@ const pairDevice = async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired code' });
     }
 
-    // Generate 64-char hex token
     const token = crypto.randomBytes(32).toString('hex');
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
 
-    // Replace any existing pairing (re-pairing kicks old tablet out)
     device.pairingTokenHash = tokenHash;
     device.pairedAt = new Date();
     device.pairingCodeHash = null;
@@ -396,7 +397,6 @@ const unpairDevice = async (req, res) => {
 // @access  Private (pairing token auth only)
 const unpairSelf = async (req, res) => {
   try {
-    // req.device is set by protectAnyAuth when a valid pairing token was sent
     if (!req.device) {
       return res.status(401).json({ message: 'Not authenticated as a paired device' });
     }
@@ -416,7 +416,7 @@ const unpairSelf = async (req, res) => {
   }
 };
 
-// @desc    Get unassigned Mess Keepers at a specific site
+// @desc    Get employees at a site who aren't already assigned to a device
 // @route   GET /api/devices/available-mess-keepers?site_id=X
 // @access  Private (requires devices page access)
 const getAvailableMessKeepers = async (req, res) => {
@@ -427,18 +427,16 @@ const getAvailableMessKeepers = async (req, res) => {
       return res.status(400).json({ message: 'site_id is required' });
     }
 
-    const User = require('../models/User');
-
-    const keepers = await User.find({
-      role: 'mess_keeper',
+    const employees = await Employee.find({
       site_id,
+      status: 'Active',
       $or: [
         { device_serial: null },
         { device_serial: { $exists: false } },
       ],
-    }).select('name email empId device_serial site_id');
+    }).select('name email empId device_serial site_id role');
 
-    res.json(keepers);
+    res.json(employees);
   } catch (error) {
     console.error('getAvailableMessKeepers error:', error);
     res.status(500).json({ message: error.message });

@@ -14,7 +14,13 @@ const EmployeeSchema = new mongoose.Schema({
   phone: { type: String, default: null },
   cnic: { type: String, unique: true, sparse: true, default: null },
   image: { type: String, default: null },
+
+  // When this employee is assigned as Mess Keeper, this holds the device serial.
+  // null = not assigned. A string (e.g. 'QRS-2024-001') = assigned to that device.
+  device_serial: { type: String, default: null },
 }, { timestamps: true });
 
-module.exports = mongoose.model('Employee', EmployeeSchema);
+// Fast lookup by device_serial (used when enriching device lists)
+EmployeeSchema.index({ device_serial: 1 }, { sparse: true });
 
+module.exports = mongoose.model('Employee', EmployeeSchema);

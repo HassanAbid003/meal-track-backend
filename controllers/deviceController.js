@@ -34,6 +34,7 @@ const getDevices = async (req, res) => {
     const keeperBySerial = {};
     keepers.forEach((k) => {
       keeperBySerial[k.device_serial] = {
+        _id: k._id,
         name: k.name,
         email: k.email,
         empId: k.empId,
@@ -139,7 +140,12 @@ const createDevice = async (req, res) => {
       isPaired: false,
       pairedAt: null,
       assignedTo: keeper
-        ? { name: keeper.name, email: keeper.email, empId: keeper.empId }
+        ? {
+            _id: keeper._id,
+            name: keeper.name,
+            email: keeper.email,
+            empId: keeper.empId,
+          }
         : null,
     });
   } catch (error) {
@@ -154,7 +160,7 @@ const createDevice = async (req, res) => {
   }
 };
 
-// @desc    Update a device
+// @desc    Update a device (supports Mess Keeper reassignment + serial changes)
 // @route   PUT /api/devices/:id
 // @access  Private (Super Admin / Site Admin)
 const updateDevice = async (req, res) => {
@@ -171,18 +177,77 @@ const updateDevice = async (req, res) => {
       }
     }
 
+    const oldSerial = device.serial;
+    const newSerial = (req.body.serial || device.serial).toUpperCase();
+
+    // ─── Basic field updates ──────────────────────────────────────
     device.name = req.body.name || device.name;
-    device.serial = req.body.serial || device.serial;
+    device.serial = newSerial;
     device.status = req.body.status || device.status;
 
     if (req.user.role === 'super_admin' && req.body.site_id) {
       device.site_id = req.body.site_id;
     }
 
+    // ─── Mess Keeper reassignment ─────────────────────────────────
+    const { mess_keeper_id } = req.body;
+    const keeperWasProvided = mess_keeper_id !== undefined;
+
+    if (keeperWasProvided) {
+      // Find the currently assigned employee (if any)
+      const currentKeeper = await Employee.findOne({ device_serial: oldSerial });
+
+      const currentKeeperId = currentKeeper?._id?.toString() || null;
+      const requestedKeeperId = mess_keeper_id ? String(mess_keeper_id) : null;
+
+      if (currentKeeperId !== requestedKeeperId) {
+        // Unassign the current keeper (role → Employee)
+        if (currentKeeper) {
+          currentKeeper.device_serial = null;
+          currentKeeper.role = 'Employee';
+          await currentKeeper.save();
+          console.log(`🔓 ${currentKeeper.name} (${currentKeeper.empId}) unassigned from ${oldSerial}`);
+        }
+
+        // Assign the new keeper
+        if (requestedKeeperId) {
+          const newKeeper = await Employee.findById(requestedKeeperId);
+
+          if (!newKeeper) {
+            return res.status(404).json({ message: 'Employee not found' });
+          }
+          if (newKeeper.site_id?.toString() !== device.site_id?.toString()) {
+            return res.status(400).json({ message: 'Employee belongs to a different site' });
+          }
+          if (newKeeper.device_serial && newKeeper.device_serial !== newSerial) {
+            return res.status(400).json({
+              message: `Employee already assigned to ${newKeeper.device_serial}`,
+            });
+          }
+          if (newKeeper.status !== 'Active') {
+            return res.status(400).json({ message: 'Employee is not active' });
+          }
+
+          newKeeper.device_serial = newSerial;
+          newKeeper.role = 'Mess Keeper';
+          await newKeeper.save();
+          console.log(`🔗 ${newKeeper.name} (${newKeeper.empId}) assigned to ${newSerial}`);
+        }
+      }
+    } else if (oldSerial !== newSerial) {
+      // Serial changed but no keeper change requested —
+      // keep the assignment consistent by updating the employee's device_serial
+      await Employee.updateOne(
+        { device_serial: oldSerial },
+        { $set: { device_serial: newSerial } }
+      );
+      console.log(`🔄 Serial change: keeper of ${oldSerial} now points to ${newSerial}`);
+    }
+
     const updated = await device.save();
     const populated = await Device.findById(updated._id).populate('site_id', 'name code');
 
-    // Re-fetch the assigned keeper for the response
+    // Return the current assigned employee
     const keeper = await Employee.findOne({ device_serial: populated.serial })
       .select('name email empId device_serial');
 
@@ -192,10 +257,19 @@ const updateDevice = async (req, res) => {
       isPaired: !!populated.pairedAt,
       pairedAt: populated.pairedAt || null,
       assignedTo: keeper
-        ? { name: keeper.name, email: keeper.email, empId: keeper.empId }
+        ? {
+            _id: keeper._id,
+            name: keeper.name,
+            email: keeper.email,
+            empId: keeper.empId,
+          }
         : null,
     });
   } catch (error) {
+    console.error('updateDevice error:', error);
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'A device with this serial already exists' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -416,25 +490,33 @@ const unpairSelf = async (req, res) => {
   }
 };
 
-// @desc    Get employees at a site who aren't already assigned to a device
-// @route   GET /api/devices/available-mess-keepers?site_id=X
+// @desc    Get active employees at a site who aren't assigned (or are assigned to a specific device)
+// @route   GET /api/devices/available-mess-keepers?site_id=X[&include_serial=Y]
 // @access  Private (requires devices page access)
 const getAvailableMessKeepers = async (req, res) => {
   try {
-    const { site_id } = req.query;
+    const { site_id, include_serial } = req.query;
 
     if (!site_id) {
       return res.status(400).json({ message: 'site_id is required' });
     }
 
-    const employees = await Employee.find({
+    const query = {
       site_id,
       status: 'Active',
       $or: [
         { device_serial: null },
         { device_serial: { $exists: false } },
       ],
-    }).select('name email empId device_serial site_id role');
+    };
+
+    // When editing an existing device, include its current keeper so they can be preselected
+    if (include_serial) {
+      query.$or.push({ device_serial: include_serial });
+    }
+
+    const employees = await Employee.find(query)
+      .select('name email empId device_serial site_id role');
 
     res.json(employees);
   } catch (error) {

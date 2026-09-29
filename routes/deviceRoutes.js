@@ -22,13 +22,16 @@ router.post('/unpair-self', protectAnyAuth, deviceController.unpairSelf);
 // ============================================================
 router.use(protect);
 
-// Legacy endpoints (still supported during transition)
+// ─── Specific (non-param) routes — MUST come before /:id ───────
 router.get('/my-device', deviceController.getMyDevice);
 router.get('/unassigned', checkPageAccess('devices'), deviceController.getUnassignedDevices);
-router.get('/', deviceController.getDevices);
+router.get('/available-mess-keepers', checkPageAccess('devices'), deviceController.getAvailableMessKeepers);
 
-// CRUD
+// ─── List & create ──────────────────────────────────────────────
+router.get('/', deviceController.getDevices);
 router.post('/', checkPageAccess('devices'), deviceController.createDevice);
+
+// ─── Param routes (/:id) ────────────────────────────────────────
 router.put('/:id', checkPageAccess('devices'), deviceController.updateDevice);
 router.delete('/:id', checkPageAccess('devices'), deviceController.deleteDevice);
 

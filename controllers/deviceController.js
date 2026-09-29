@@ -82,21 +82,55 @@ const heartbeat = async (req, res) => {
 // @desc    Create a new device
 // @route   POST /api/devices
 // @access  Private (Super Admin / Site Admin)
+// @desc    Create a new device
+// @route   POST /api/devices
+// @access  Private (Super Admin / Site Admin)
 const createDevice = async (req, res) => {
   try {
-    const { name, serial, site_id, status } = req.body;
+    const { name, serial, site_id, status, mess_keeper_id } = req.body;
 
     let finalSiteId = site_id;
     if (req.user.role === 'site_admin' || req.user.role === 'mess_keeper') {
       finalSiteId = req.user.site_id;
     }
 
+    // Optional: validate the mess keeper before creating the device
+    const User = require('../models/User');
+    let keeper = null;
+
+    if (mess_keeper_id) {
+      keeper = await User.findById(mess_keeper_id);
+
+      if (!keeper) {
+        return res.status(404).json({ message: 'Mess Keeper not found' });
+      }
+      if (keeper.role !== 'mess_keeper') {
+        return res.status(400).json({ message: 'Selected user is not a Mess Keeper' });
+      }
+      if (keeper.site_id?.toString() !== finalSiteId?.toString()) {
+        return res.status(400).json({ message: 'Mess Keeper belongs to a different site' });
+      }
+      if (keeper.device_serial) {
+        return res.status(400).json({
+          message: `Mess Keeper already assigned to ${keeper.device_serial}`,
+        });
+      }
+    }
+
+    // Create the device
     const device = await Device.create({
       name,
-      serial,
+      serial: serial?.toUpperCase?.(),
       site_id: finalSiteId,
       status: status || 'online',
     });
+
+    // Assign the mess keeper to this device's serial (optional)
+    if (keeper) {
+      keeper.device_serial = device.serial;
+      await keeper.save();
+      console.log(`🔗 Device ${device.serial} assigned to Mess Keeper ${keeper.name}`);
+    }
 
     const populated = await Device.findById(device._id).populate('site_id', 'name code');
     res.status(201).json({
@@ -104,8 +138,18 @@ const createDevice = async (req, res) => {
       isOnline: isDeviceOnline(populated.lastPing),
       isPaired: false,
       pairedAt: null,
+      assignedTo: keeper
+        ? { name: keeper.name, email: keeper.email }
+        : null,
     });
   } catch (error) {
+    console.error('createDevice error:', error);
+
+    // Handle duplicate serial (unique index on Device.serial)
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'A device with this serial already exists' });
+    }
+
     res.status(500).json({ message: error.message });
   }
 };
@@ -372,6 +416,35 @@ const unpairSelf = async (req, res) => {
   }
 };
 
+// @desc    Get unassigned Mess Keepers at a specific site
+// @route   GET /api/devices/available-mess-keepers?site_id=X
+// @access  Private (requires devices page access)
+const getAvailableMessKeepers = async (req, res) => {
+  try {
+    const { site_id } = req.query;
+
+    if (!site_id) {
+      return res.status(400).json({ message: 'site_id is required' });
+    }
+
+    const User = require('../models/User');
+
+    const keepers = await User.find({
+      role: 'mess_keeper',
+      site_id,
+      $or: [
+        { device_serial: null },
+        { device_serial: { $exists: false } },
+      ],
+    }).select('name email empId device_serial site_id');
+
+    res.json(keepers);
+  } catch (error) {
+    console.error('getAvailableMessKeepers error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getDevices,
   heartbeat,
@@ -379,6 +452,7 @@ module.exports = {
   updateDevice,
   deleteDevice,
   getMyDevice,
+  getAvailableMessKeepers,
   getUnassignedDevices,
   generatePairingCode,
   pairDevice,

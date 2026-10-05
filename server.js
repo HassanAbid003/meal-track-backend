@@ -236,7 +236,6 @@ if (fs.existsSync(publicDir)) {
 
 
 // ─── Start Server ─────────────────────────────────────────────────
-// ─── Start Server ─────────────────────────────────────────────────
 mongoose.connect(process.env.MONGODB_URI)
   .then(async () => {
     console.log('✅ MongoDB Connected');
